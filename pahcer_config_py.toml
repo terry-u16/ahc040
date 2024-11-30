@@ -11,22 +11,12 @@ start_seed = 0
 end_seed = 100
 threads = 0
 out_dir = "./pahcer"
+compile_steps = []
 
-[[test.compile_steps]]
-program = "cargo"
-args = ["build", "--release"]
-
-[[test.compile_steps]]
-program = "rm"
-args = ["-f", "./ahc040"]
-
-[[test.compile_steps]]
-program = "mv"
-args = ["../target/release/ahc040", "./ahc040"]
 
 [[test.test_steps]]
 program = "./tester"
-args = ["./ahc040"]
+args = ["uv", "run", "./py/sample_solution.py"]
 stdin = "./pahcer/in/{SEED04}.txt"
 stdout = "./pahcer/out/{SEED04}.txt"
 stderr = "./pahcer/err/{SEED04}.txt"
