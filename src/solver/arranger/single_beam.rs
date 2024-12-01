@@ -188,12 +188,13 @@ impl ActGen {
         let x1 = x0 + width;
 
         // 側面がピッタリくっついているかチェック
-        let is_touching = y0 == 0
-            || large_state
-                .placements
-                .iter()
-                .rev()
-                .any(|p| x0.max(p.x0) < x1.min(p.x1) && y0 == p.y1);
+        let is_touching = match base {
+            Some(base) => {
+                let p = large_state.placements[base];
+                x0.max(p.x0) < x1.min(p.x1)
+            }
+            None => true,
+        };
 
         if !is_touching {
             return None;
@@ -259,12 +260,13 @@ impl ActGen {
         let y1 = y0 + height;
 
         // 側面がピッタリくっついているかチェック
-        let is_touching = x0 == 0
-            || large_state
-                .placements
-                .iter()
-                .rev()
-                .any(|p| y0.max(p.y0) < y1.min(p.y1) && x0 == p.x1);
+        let is_touching = match base {
+            Some(base) => {
+                let p = large_state.placements[base];
+                y0.max(p.y0) < y1.min(p.y1)
+            }
+            None => true,
+        };
 
         if !is_touching {
             return None;
