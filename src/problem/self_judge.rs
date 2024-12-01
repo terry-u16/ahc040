@@ -46,6 +46,11 @@ impl SelfJudge {
 impl Judge for SelfJudge {
     fn query(&mut self, query: &[super::Op]) -> super::Measure {
         assert!(self.turn < self.input.query_cnt());
+        println!("{}", query.len());
+
+        for op in query {
+            println!("{}", op);
+        }
 
         let mut width = 0;
         let mut height = 0;

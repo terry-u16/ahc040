@@ -4,7 +4,9 @@ import subprocess
 
 
 def run_single(seed: int):
-    subprocess.run(["cargo", "build", "--release"]).check_returncode()
+    subprocess.run(
+        ["cargo", "build", "--release", "--features", "local"]
+    ).check_returncode()
     shutil.move("../target/release/ahc040", "./ahc040")
 
     input_file = f"./pahcer/in/{seed:04}.txt"
@@ -15,7 +17,7 @@ def run_single(seed: int):
         with open(output_file, "w") as o:
             with open(err_file, "w") as e:
                 subprocess.run(
-                    ["./tester", "./ahc040"], stdin=i, stdout=o, stderr=e
+                    ["./ahc040"], stdin=i, stdout=o, stderr=e
                 ).check_returncode()
 
     with open(err_file, "r") as e:
@@ -25,6 +27,6 @@ def run_single(seed: int):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-s", "--seed", type=int)
+    parser.add_argument("-s", "--seed", type=int, required=True)
     args = parser.parse_args()
     run_single(args.seed)
