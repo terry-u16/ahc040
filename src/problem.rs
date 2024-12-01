@@ -66,6 +66,14 @@ impl Rect {
     pub fn new(height: u32, width: u32) -> Self {
         Self { height, width }
     }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -79,11 +87,11 @@ impl Measure {
         Self { height, width }
     }
 
-    fn height(&self) -> u32 {
+    pub fn height(&self) -> u32 {
         self.height
     }
 
-    fn width(&self) -> u32 {
+    pub fn width(&self) -> u32 {
         self.width
     }
 }
