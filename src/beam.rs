@@ -309,11 +309,6 @@ impl BayesianBeamWidthSuggester {
         let stddev_observe_sec = 0.05 * mean_sec;
         let variance_observe_sec = stddev_observe_sec * stddev_observe_sec;
 
-        eprintln!(
-            "standard beam width: {}, time limit: {:.3}s",
-            standard_beam_width, time_limit_sec
-        );
-
         Self {
             mean_sec,
             variance_sec,

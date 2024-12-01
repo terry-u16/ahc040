@@ -56,12 +56,11 @@ impl<R: Rng> Arranger for SingleBeamArranger<'_, R> {
             standard_beam_width,
             1,
             10000,
-            1,
+            0,
         );
         let deduplicator = beam::HashSingleDeduplicator::new();
-        let (ops, score) = beam.run(input.rect_cnt(), beam_width_suggester, deduplicator);
+        let (ops, _) = beam.run(input.rect_cnt(), beam_width_suggester, deduplicator);
 
-        eprintln!("score: {}", score);
         ops
     }
 }
