@@ -2,7 +2,7 @@ mod atcoder_judge;
 mod self_judge;
 
 use proconio::input_interactive;
-use std::fmt::Display;
+use std::{fmt::Display, time::Instant};
 
 #[derive(Debug, Clone)]
 pub struct Input {
@@ -10,6 +10,7 @@ pub struct Input {
     query_cnt: usize,
     std_dev: f64,
     rect_measures: Vec<Measure>,
+    since: Instant,
 }
 
 impl Input {
@@ -20,6 +21,7 @@ impl Input {
             std_dev: f64,
         }
 
+        let since = Instant::now();
         let mut rectangles = Vec::with_capacity(rect_cnt);
 
         for _ in 0..rect_cnt {
@@ -36,6 +38,7 @@ impl Input {
             query_cnt,
             std_dev,
             rect_measures: rectangles,
+            since,
         }
     }
 
@@ -53,6 +56,10 @@ impl Input {
 
     pub fn rect_measures(&self) -> &[Measure] {
         &self.rect_measures
+    }
+
+    pub fn since(&self) -> Instant {
+        self.since
     }
 }
 

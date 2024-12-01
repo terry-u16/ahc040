@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use super::{
     estimator::{Estimator, Observation, RectDir, RectEdge},
     Solver,
@@ -34,9 +32,9 @@ impl Solver for Solver01 {
         eprintln!("[Init]");
         estimator.dump_estimated(judge.rects());
 
-        const ARRANGE_COUNT: usize = 5;
+        let arrange_count = input.query_cnt() / 5;
 
-        for _ in 0..input.query_cnt() - ARRANGE_COUNT {
+        for _ in 0..input.query_cnt() - arrange_count {
             let (ops, edges_h, edges_v) =
                 estimator::get_placements_randomly(input, &estimator, &mut rng);
             let measure = judge.query(&ops);
@@ -51,10 +49,10 @@ impl Solver for Solver01 {
         estimator.dump_estimated(judge.rects());
 
         let sampler = estimator.get_sampler();
+        let each_duration = (2.9 - input.since().elapsed().as_secs_f64()) / arrange_count as f64;
 
-        for _ in 0..ARRANGE_COUNT {
-            let mut arranger =
-                arranger::get_arranger(&mut rng, &sampler, Duration::from_millis(500));
+        for _ in 0..arrange_count {
+            let mut arranger = arranger::get_arranger(&mut rng, &sampler, each_duration);
             let ops = arranger.arrange(&input);
 
             _ = judge.query(&ops);

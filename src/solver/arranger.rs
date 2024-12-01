@@ -1,12 +1,8 @@
-use std::time::Duration;
-
-use rand::Rng;
-
-use crate::problem::{Input, Op};
+mod single_beam;
 
 use super::estimator::Sampler;
-
-mod single_beam;
+use crate::problem::{Input, Op};
+use rand::Rng;
 
 pub(super) trait Arranger {
     fn arrange(&mut self, input: &Input) -> Vec<Op>;
@@ -15,7 +11,7 @@ pub(super) trait Arranger {
 pub(super) fn get_arranger<'a>(
     rng: &'a mut impl Rng,
     sampler: &'a Sampler,
-    duration: Duration,
+    duration_sec: f64,
 ) -> impl Arranger + 'a {
-    single_beam::SingleBeamArranger::new(&sampler, rng, duration)
+    single_beam::SingleBeamArranger::new(&sampler, rng, duration_sec)
 }

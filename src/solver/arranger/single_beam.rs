@@ -1,26 +1,23 @@
-use std::time::Duration;
-
-use rand::Rng;
-
 use super::Arranger;
 use crate::{
     beam::{self, BayesianBeamWidthSuggester},
     problem::{Dir, Input, Op, Rect},
     solver::estimator::Sampler,
 };
+use rand::Rng;
 
 pub(super) struct SingleBeamArranger<'a, R: Rng> {
     sampler: &'a Sampler<'a>,
     rng: &'a mut R,
-    duration: Duration,
+    duration_sec: f64,
 }
 
 impl<'a, R: Rng> SingleBeamArranger<'a, R> {
-    pub(super) fn new(sampler: &'a Sampler<'a>, rng: &'a mut R, duration: Duration) -> Self {
+    pub(super) fn new(sampler: &'a Sampler<'a>, rng: &'a mut R, duration_sec: f64) -> Self {
         Self {
             sampler,
             rng,
-            duration,
+            duration_sec,
         }
     }
 }
@@ -33,19 +30,19 @@ impl<R: Rng> Arranger for SingleBeamArranger<'_, R> {
         let small_state = SmallState::default();
         let act_gen = ActGen;
 
-        let remaining_time = self.duration - since.elapsed();
+        let remaining_time = self.duration_sec - since.elapsed().as_secs_f64();
         let mut beam = beam::BeamSearch::new(large_state, small_state, act_gen);
+        let standard_beam_width = 100_000_000 / (input.rect_cnt() as usize).pow(3);
         let beam_width_suggester = BayesianBeamWidthSuggester::new(
             input.rect_cnt(),
             5,
-            remaining_time.as_secs_f64(),
-            100,
+            remaining_time,
+            standard_beam_width,
             1,
-            1000,
+            10000,
             1,
         );
-        //let deduplicator = beam::HashSingleDeduplicator::new();
-        let deduplicator = beam::NoOpDeduplicator;
+        let deduplicator = beam::HashSingleDeduplicator::new();
         let (ops, score) = beam.run(input.rect_cnt(), beam_width_suggester, deduplicator);
 
         eprintln!("score: {}", score);
