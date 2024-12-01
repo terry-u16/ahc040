@@ -427,22 +427,26 @@ impl beam::ActGen<SmallState> for ActGen {
         large_state: &<SmallState as beam::SmallState>::LargeState,
         next_states: &mut Vec<SmallState>,
     ) {
-        // Left
-        next_states.extend(self.gen_left_cand(&large_state, None, false));
-        next_states.extend(self.gen_left_cand(&large_state, None, true));
+        let rotates = if large_state.turn == 0 {
+            vec![false]
+        } else {
+            vec![false, true]
+        };
 
-        for i in 0..large_state.turn {
-            next_states.extend(self.gen_left_cand(&large_state, Some(i), false));
-            next_states.extend(self.gen_left_cand(&large_state, Some(i), true));
-        }
+        for rotate in rotates {
+            // Left
+            next_states.extend(self.gen_left_cand(&large_state, None, rotate));
 
-        // Up
-        next_states.extend(self.gen_up_cand(&large_state, None, false));
-        next_states.extend(self.gen_up_cand(&large_state, None, true));
+            for i in 0..large_state.turn {
+                next_states.extend(self.gen_left_cand(&large_state, Some(i), rotate));
+            }
 
-        for i in 0..large_state.turn {
-            next_states.extend(self.gen_up_cand(&large_state, Some(i), false));
-            next_states.extend(self.gen_up_cand(&large_state, Some(i), true));
+            // Up
+            next_states.extend(self.gen_up_cand(&large_state, None, rotate));
+
+            for i in 0..large_state.turn {
+                next_states.extend(self.gen_up_cand(&large_state, Some(i), rotate));
+            }
         }
     }
 }
