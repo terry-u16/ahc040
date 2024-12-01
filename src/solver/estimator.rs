@@ -1,6 +1,8 @@
-use nalgebra::{DMatrix, DVector, Matrix1};
-
-use crate::problem::Input;
+use crate::problem::{Input, Rect};
+use itertools::Itertools;
+use nalgebra::{Cholesky, DMatrix, DVector, Matrix1};
+use rand::prelude::*;
+use rand_distr::StandardNormal;
 
 #[derive(Debug, Clone)]
 pub struct Estimator {
@@ -65,6 +67,33 @@ impl Estimator {
         self.variance = variance;
     }
 
+    pub fn get_sampler(&self) -> Sampler {
+        Sampler::new(self)
+    }
+
+    pub fn dump_estimated(&self, actual_rects: Option<&[Rect]>) {
+        let mean_heights = self.mean_height();
+        let mean_widths = self.mean_width();
+        let variance_heights = self.variance_height();
+        let variance_widths = self.variance_width();
+
+        for i in 0..self.rect_cnt {
+            let std_dev_h = variance_heights[i].sqrt();
+            let std_dev_w = variance_widths[i].sqrt();
+            eprint!(
+                "{:>02} {:>6.0} ± {:>5.0} / {:>6.0} ± {:>5.0}",
+                i, mean_heights[i], std_dev_h, mean_widths[i], std_dev_w
+            );
+
+            if let Some(rects) = actual_rects {
+                let rect = rects[i];
+                eprintln!(" (actual: {:>6.0} / {:>6.0})", rect.height(), rect.width());
+            } else {
+                eprintln!();
+            }
+        }
+    }
+
     pub fn mean(&self) -> &[f64] {
         self.mean.as_slice()
     }
@@ -109,4 +138,38 @@ pub struct RectEdge(pub usize, pub RectDir);
 pub enum RectDir {
     Vertical,
     Horizontal,
+}
+
+pub struct Sampler<'a> {
+    estimator: &'a Estimator,
+    cholesky: Cholesky<f64, nalgebra::Dyn>,
+}
+
+impl<'a> Sampler<'a> {
+    fn new(estimator: &'a Estimator) -> Self {
+        let cholesky = estimator.variance.clone().cholesky().unwrap();
+
+        Self {
+            estimator,
+            cholesky,
+        }
+    }
+
+    pub fn sample(&self, rng: &mut impl Rng) -> Vec<Rect> {
+        let dist = StandardNormal;
+        let values: Vec<f64> = (0..self.estimator.mean.len())
+            .map(|_| dist.sample(rng))
+            .collect_vec();
+        let values = &self.cholesky.l() * DVector::from_vec(values) + &self.estimator.mean;
+
+        let mut rects = Vec::with_capacity(self.estimator.rect_cnt);
+
+        for i in 0..self.estimator.rect_cnt {
+            let height = (values[i].round() as u32).clamp(20000, 100000);
+            let width = (values[i + self.estimator.rect_cnt] as u32).clamp(20000, 100000);
+            rects.push(Rect::new(height, width));
+        }
+
+        rects
+    }
 }
