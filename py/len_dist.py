@@ -1,3 +1,4 @@
+# 箱の辺の長さの事前分布を正規分布で近似する
 import random
 
 import matplotlib.pyplot as plt
