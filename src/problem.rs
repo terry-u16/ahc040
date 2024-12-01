@@ -102,7 +102,7 @@ impl Display for Measure {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dir {
     Up,
     Left,

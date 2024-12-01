@@ -44,13 +44,13 @@ impl Estimator {
         let y = Matrix1::new(observation.len as f64);
         let mut c = DVector::zeros(self.rect_cnt * 2);
 
-        for &RectEdge(i, dir) in observation.edges.iter() {
-            let i = match dir {
-                RectDir::Vertical => i,
-                RectDir::Horizontal => i + self.rect_cnt,
+        for edge in observation.edges.iter() {
+            let i = match edge.dir {
+                RectDir::Vertical => edge.index,
+                RectDir::Horizontal => edge.index + self.rect_cnt,
             };
 
-            c[i] = 1.0;
+            c[i] += edge.weight;
         }
 
         let c_t = c.transpose();
@@ -140,7 +140,17 @@ impl Observation {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct RectEdge(pub usize, pub RectDir);
+pub struct RectEdge {
+    index: usize,
+    dir: RectDir,
+    weight: f64,
+}
+
+impl RectEdge {
+    pub fn new(index: usize, dir: RectDir, weight: f64) -> Self {
+        Self { index, dir, weight }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum RectDir {

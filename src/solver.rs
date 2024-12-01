@@ -1,4 +1,4 @@
-pub mod stack;
+pub mod solver01;
 mod estimator;
 
 use crate::problem::{Input, Judge};

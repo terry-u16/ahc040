@@ -8,6 +8,6 @@ mod util;
 fn main() {
     let input = Input::read();
     let judge = problem::gen_judge(&input);
-    let solver = solver::stack::StackSolver;
+    let solver = solver::solver01::Solver01;
     solver.solve(&input, judge);
 }
