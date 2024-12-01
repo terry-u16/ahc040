@@ -87,7 +87,15 @@ impl Estimator {
 
             if let Some(rects) = actual_rects {
                 let rect = rects[i];
-                eprintln!(" (actual: {:>6.0} / {:>6.0})", rect.height(), rect.width());
+                let sigma_h = (rect.height() as f64 - mean_heights[i]) / std_dev_h;
+                let sigma_w = (rect.width() as f64 - mean_widths[i]) / std_dev_w;
+                eprintln!(
+                    " (actual: {:>6.0} ({:+>5.2}σ) / {:>6.0} ({:+>5.2}σ))",
+                    rect.height(),
+                    sigma_h,
+                    rect.width(),
+                    sigma_w
+                );
             } else {
                 eprintln!();
             }
