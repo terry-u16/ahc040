@@ -1,10 +1,15 @@
+use std::time::Duration;
+
 use super::{
     estimator::{Estimator, Observation, RectDir, RectEdge},
     Solver,
 };
 use crate::{
     problem::{Input, Judge},
-    solver::estimator,
+    solver::{
+        arranger::{self, Arranger},
+        estimator,
+    },
 };
 use rand_pcg::Pcg64Mcg;
 
@@ -29,7 +34,9 @@ impl Solver for Solver01 {
         eprintln!("[Init]");
         estimator.dump_estimated(judge.rects());
 
-        for _ in 0..input.query_cnt() {
+        const ARRANGE_COUNT: usize = 5;
+
+        for _ in 0..input.query_cnt() - ARRANGE_COUNT {
             let (ops, edges_h, edges_v) =
                 estimator::get_placements_randomly(input, &estimator, &mut rng);
             let measure = judge.query(&ops);
@@ -42,5 +49,15 @@ impl Solver for Solver01 {
 
         eprintln!("[Final]");
         estimator.dump_estimated(judge.rects());
+
+        let sampler = estimator.get_sampler();
+
+        for _ in 0..ARRANGE_COUNT {
+            let mut arranger =
+                arranger::get_arranger(&mut rng, &sampler, Duration::from_millis(500));
+            let ops = arranger.arrange(&input);
+
+            _ = judge.query(&ops);
+        }
     }
 }

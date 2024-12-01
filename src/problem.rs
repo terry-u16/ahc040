@@ -76,7 +76,7 @@ impl Rect {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Measure {
     height: u32,
     width: u32,
@@ -102,8 +102,9 @@ impl Display for Measure {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Dir {
+    #[default]
     Up,
     Left,
 }
@@ -117,7 +118,7 @@ impl Display for Dir {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Op {
     rect_idx: usize,
     rotate: bool,
