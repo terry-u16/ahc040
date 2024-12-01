@@ -2,20 +2,21 @@ use super::Arranger;
 use crate::{
     beam::{self, BayesianBeamWidthSuggester},
     problem::{Dir, Input, Op, Rect},
-    solver::estimator::Sampler,
+    solver::estimator::Estimator,
 };
+use itertools::Itertools;
 use rand::Rng;
 
 pub(super) struct SingleBeamArranger<'a, R: Rng> {
-    sampler: &'a Sampler<'a>,
+    estimator: &'a Estimator,
     rng: &'a mut R,
     duration_sec: f64,
 }
 
 impl<'a, R: Rng> SingleBeamArranger<'a, R> {
-    pub(super) fn new(sampler: &'a Sampler<'a>, rng: &'a mut R, duration_sec: f64) -> Self {
+    pub(super) fn new(estimator: &'a Estimator, rng: &'a mut R, duration_sec: f64) -> Self {
         Self {
-            sampler,
+            estimator,
             rng,
             duration_sec,
         }
@@ -25,8 +26,23 @@ impl<'a, R: Rng> SingleBeamArranger<'a, R> {
 impl<R: Rng> Arranger for SingleBeamArranger<'_, R> {
     fn arrange(&mut self, input: &Input) -> Vec<Op> {
         let since = std::time::Instant::now();
-        let rects = self.sampler.sample(self.rng);
-        let large_state = LargeState::new(input.clone(), rects, self.rng);
+        let rects = self.estimator.get_sampler().sample(self.rng);
+        const SIGMA: f64 = 4.0;
+        let buffer_height = self
+            .estimator
+            .variance_height()
+            .iter()
+            .map(|v| (v.sqrt() * SIGMA).round() as u32)
+            .collect_vec();
+        let buffer_width = self
+            .estimator
+            .variance_width()
+            .iter()
+            .map(|v| (v.sqrt() * SIGMA).round() as u32)
+            .collect_vec();
+
+        let large_state =
+            LargeState::new(input.clone(), rects, buffer_height, buffer_width, self.rng);
         let small_state = SmallState::default();
         let act_gen = ActGen;
 
@@ -53,8 +69,11 @@ impl<R: Rng> Arranger for SingleBeamArranger<'_, R> {
 #[derive(Debug, Clone)]
 struct LargeState {
     rects: Vec<Rect>,
+    buffer_height: Vec<u32>,
+    buffer_width: Vec<u32>,
     width: u32,
     height: u32,
+    interfering_penalty: u32,
     placements: Vec<Placement>,
     hash: u64,
     hash_base_x: Vec<u64>,
@@ -64,15 +83,24 @@ struct LargeState {
 }
 
 impl LargeState {
-    fn new(input: Input, rects: Vec<Rect>, rng: &mut impl rand::Rng) -> Self {
+    fn new(
+        input: Input,
+        rects: Vec<Rect>,
+        buffer_height: Vec<u32>,
+        buffer_width: Vec<u32>,
+        rng: &mut impl rand::Rng,
+    ) -> Self {
         let hash_base_x = (0..input.rect_cnt()).map(|_| rng.gen()).collect();
         let hash_base_y = (0..input.rect_cnt()).map(|_| rng.gen()).collect();
         let hash_base_rot = (0..input.rect_cnt()).map(|_| rng.gen()).collect();
 
         Self {
             rects,
+            buffer_height,
+            buffer_width,
             width: 0,
             height: 0,
+            interfering_penalty: 0,
             placements: vec![],
             hash: 0,
             hash_base_x,
@@ -90,6 +118,8 @@ struct SmallState {
     old_height: u32,
     new_width: u32,
     new_height: u32,
+    old_interfering_penalty: u32,
+    new_interfering_penalty: u32,
     hash: u64,
     hash_xor: u64,
     op: Op,
@@ -102,7 +132,7 @@ impl beam::SmallState for SmallState {
     type Action = Op;
 
     fn raw_score(&self) -> Self::Score {
-        (self.new_height + self.new_width) as i32
+        (self.new_height + self.new_width + self.new_interfering_penalty) as i32
     }
 
     fn beam_score(&self) -> Self::Score {
@@ -117,6 +147,7 @@ impl beam::SmallState for SmallState {
         state.placements.push(self.placement);
         state.width = self.new_width;
         state.height = self.new_height;
+        state.interfering_penalty = self.new_interfering_penalty;
         state.hash ^= self.hash_xor;
         state.turn += 1;
     }
@@ -125,6 +156,7 @@ impl beam::SmallState for SmallState {
         state.placements.pop();
         state.width = self.old_width;
         state.height = self.old_height;
+        state.interfering_penalty = self.old_interfering_penalty;
         state.hash ^= self.hash_xor;
         state.turn -= 1;
     }
@@ -140,13 +172,20 @@ struct Placement {
     x1: u32,
     y0: u32,
     y1: u32,
+    rotate: bool,
 }
 
 impl Placement {
-    fn new(x0: u32, x1: u32, y0: u32, y1: u32) -> Self {
+    fn new(x0: u32, x1: u32, y0: u32, y1: u32, rotate: bool) -> Self {
         assert!(x0 < x1);
         assert!(y0 < y1);
-        Self { x0, x1, y0, y1 }
+        Self {
+            x0,
+            x1,
+            y0,
+            y1,
+            rotate,
+        }
     }
 }
 
@@ -200,7 +239,46 @@ impl ActGen {
             return None;
         }
 
-        let placement = Placement::new(x0, x1, y0, y1);
+        // 干渉の可能性があったら減点
+        let std_dev_me = if rotate {
+            large_state.buffer_width[turn]
+        } else {
+            large_state.buffer_height[turn]
+        };
+
+        let interfering_penalty = (0..large_state.turn)
+            .map(|i| {
+                if Some(i) == base {
+                    return 0;
+                }
+
+                let p = large_state.placements[i];
+
+                if !(x0.max(p.x0) < x1.min(p.x1)) {
+                    return 0;
+                }
+
+                let std_dev_other = if p.rotate {
+                    large_state.buffer_width[i]
+                } else {
+                    large_state.buffer_height[i]
+                };
+
+                let mut penalty = 0;
+
+                if p.y1 <= y0 {
+                    penalty += (p.y1 + std_dev_other).saturating_sub(y0);
+                }
+
+                if y1 <= p.y0 {
+                    penalty += (y1 + std_dev_me).saturating_sub(p.y0);
+                }
+
+                penalty
+            })
+            .sum::<u32>();
+
+        let placement = Placement::new(x0, x1, y0, y1, rotate);
         let hash_x = large_state.hash_base_x[turn].wrapping_mul(x0 as u64);
         let hash_y = large_state.hash_base_y[turn].wrapping_mul(y0 as u64);
         let hash_rot = large_state.hash_base_rot[turn].wrapping_mul(rotate as u64);
@@ -208,6 +286,7 @@ impl ActGen {
 
         let new_width = x1.max(large_state.width);
         let new_height = y1.max(large_state.height);
+        let new_interfering_penalty = large_state.interfering_penalty + interfering_penalty;
 
         let hash = large_state.hash ^ hash_xor;
 
@@ -217,8 +296,10 @@ impl ActGen {
             placement,
             old_width: large_state.width,
             old_height: large_state.height,
+            old_interfering_penalty: large_state.interfering_penalty,
             new_width,
             new_height,
+            new_interfering_penalty,
             hash,
             hash_xor,
             op,
@@ -272,7 +353,46 @@ impl ActGen {
             return None;
         }
 
-        let placement = Placement::new(x0, x1, y0, y1);
+        // 干渉の可能性があったら減点
+        let std_dev_me = if rotate {
+            large_state.buffer_height[turn]
+        } else {
+            large_state.buffer_width[turn]
+        };
+
+        let interfering_penalty = (0..large_state.turn)
+            .map(|i| {
+                if Some(i) == base {
+                    return 0;
+                }
+
+                let p = large_state.placements[i];
+
+                if !(y0.max(p.y0) < y1.min(p.y1)) {
+                    return 0;
+                }
+
+                let std_dev_other = if p.rotate {
+                    large_state.buffer_height[i]
+                } else {
+                    large_state.buffer_width[i]
+                };
+
+                let mut penalty = 0;
+
+                if p.x1 <= x0 {
+                    penalty += (p.x1 + std_dev_other).saturating_sub(x0);
+                }
+
+                if x1 <= p.x0 {
+                    penalty += (x1 + std_dev_me).saturating_sub(p.x0);
+                }
+
+                penalty
+            })
+            .sum::<u32>();
+
+        let placement = Placement::new(x0, x1, y0, y1, rotate);
         let hash_x = large_state.hash_base_x[turn].wrapping_mul(x0 as u64);
         let hash_y = large_state.hash_base_y[turn].wrapping_mul(y0 as u64);
         let hash_rot = large_state.hash_base_rot[turn].wrapping_mul(rotate as u64);
@@ -280,6 +400,7 @@ impl ActGen {
 
         let new_width = x1.max(large_state.width);
         let new_height = y1.max(large_state.height);
+        let new_interfering_penalty = large_state.interfering_penalty + interfering_penalty;
 
         let hash = large_state.hash ^ hash_xor;
 
@@ -289,8 +410,10 @@ impl ActGen {
             placement,
             old_width: large_state.width,
             old_height: large_state.height,
+            old_interfering_penalty: large_state.interfering_penalty,
             new_width,
             new_height,
+            new_interfering_penalty,
             hash,
             hash_xor,
             op,

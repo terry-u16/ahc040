@@ -1,6 +1,6 @@
 mod single_beam;
 
-use super::estimator::Sampler;
+use super::estimator::Estimator;
 use crate::problem::{Input, Op};
 use rand::Rng;
 
@@ -10,8 +10,8 @@ pub(super) trait Arranger {
 
 pub(super) fn get_arranger<'a>(
     rng: &'a mut impl Rng,
-    sampler: &'a Sampler,
+    estimator: &'a Estimator,
     duration_sec: f64,
 ) -> impl Arranger + 'a {
-    single_beam::SingleBeamArranger::new(&sampler, rng, duration_sec)
+    single_beam::SingleBeamArranger::new(estimator, rng, duration_sec)
 }
