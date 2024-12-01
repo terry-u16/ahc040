@@ -33,7 +33,7 @@ impl Solver for Solver01 {
         eprintln!("[Init]");
         estimator.dump_estimated(judge.rects());
 
-        let arrange_count = input.query_cnt() / 5;
+        let arrange_count = (input.query_cnt() / 5).clamp(5, 15);
 
         for _ in 0..input.query_cnt() - arrange_count {
             let (ops, edges_h, edges_v) =
