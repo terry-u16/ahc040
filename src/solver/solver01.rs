@@ -9,13 +9,14 @@ use crate::{
         estimator,
     },
 };
+use rand::SeedableRng;
 use rand_pcg::Pcg64Mcg;
 
 pub struct Solver01;
 
 impl Solver for Solver01 {
     fn solve(&self, input: &Input, mut judge: impl Judge) {
-        let mut rng = Pcg64Mcg::new(42);
+        let mut rng = Pcg64Mcg::from_entropy();
         let mut estimator = Estimator::new(input);
 
         for (i, &rect) in input.rect_measures().iter().enumerate() {
