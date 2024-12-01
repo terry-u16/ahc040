@@ -3,6 +3,9 @@ name = "ahc040"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+local = []
+
 [dependencies]
 # 202301から:
 ac-library-rs = "=0.1.1"

@@ -1,6 +1,8 @@
-use std::fmt::Display;
+mod atcoder_judge;
+mod self_judge;
 
 use proconio::input_interactive;
+use std::fmt::Display;
 
 #[derive(Debug, Clone)]
 pub struct Input {
@@ -22,8 +24,8 @@ impl Input {
 
         for _ in 0..rect_cnt {
             input_interactive! {
-                width: u64,
-                height: u64,
+                width: u32,
+                height: u32,
             }
 
             rectangles.push(Measure::new(height, width));
@@ -55,21 +57,33 @@ impl Input {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct Rect {
+    height: u32,
+    width: u32,
+}
+
+impl Rect {
+    pub fn new(height: u32, width: u32) -> Self {
+        Self { height, width }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Measure {
-    height: u64,
-    width: u64,
+    height: u32,
+    width: u32,
 }
 
 impl Measure {
-    fn new(height: u64, width: u64) -> Self {
+    fn new(height: u32, width: u32) -> Self {
         Self { height, width }
     }
 
-    fn height(&self) -> u64 {
+    fn height(&self) -> u32 {
         self.height
     }
 
-    fn width(&self) -> u64 {
+    fn width(&self) -> u32 {
         self.width
     }
 }
@@ -134,38 +148,15 @@ impl Display for Op {
 pub trait Judge {
     fn query(&mut self, query: &[Op]) -> Measure;
     fn query_cnt(&self) -> usize;
+    fn rects(&self) -> Option<&[Rect]>;
 }
 
-#[derive(Debug, Clone)]
-pub struct ActualJudge {
-    query_cnt: usize,
+#[cfg(feature = "local")]
+pub fn gen_judge(input: &Input) -> impl Judge {
+    self_judge::SelfJudge::read(input)
 }
 
-impl ActualJudge {
-    pub fn new() -> Self {
-        Self { query_cnt: 0 }
-    }
-}
-
-impl Judge for ActualJudge {
-    fn query(&mut self, ops: &[Op]) -> Measure {
-        self.query_cnt += 1;
-
-        println!("{}", ops.len());
-
-        for op in ops {
-            println!("{}", op);
-        }
-
-        input_interactive! {
-            width: u64,
-            height: u64,
-        }
-
-        Measure::new(height, width)
-    }
-
-    fn query_cnt(&self) -> usize {
-        self.query_cnt
-    }
+#[cfg(not(feature = "local"))]
+pub fn gen_judge(_input: &Input) -> impl Judge {
+    atcoder_judge::AtCoderJudge::new()
 }

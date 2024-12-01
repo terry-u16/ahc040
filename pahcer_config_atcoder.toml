@@ -15,7 +15,7 @@ out_dir = "./pahcer"
 
 [[test.compile_steps]]
 program = "cargo"
-args = ["build", "--release", "--features", "local"]
+args = ["build", "--release"]
 
 [[test.compile_steps]]
 program = "rm"
@@ -26,8 +26,8 @@ program = "mv"
 args = ["../target/release/ahc040", "./ahc040"]
 
 [[test.test_steps]]
-program = "./ahc040"
-args = []
+program = "./tester"
+args = ["./ahc040"]
 stdin = "./pahcer/in/{SEED04}.txt"
 stdout = "./pahcer/out/{SEED04}.txt"
 stderr = "./pahcer/err/{SEED04}.txt"
