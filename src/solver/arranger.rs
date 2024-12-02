@@ -1,3 +1,4 @@
+mod multi_beam;
 mod single_beam;
 
 use super::estimator::Estimator;
@@ -13,5 +14,6 @@ pub(super) fn get_arranger<'a>(
     estimator: &'a Estimator,
     duration_sec: f64,
 ) -> impl Arranger + 'a {
-    single_beam::SingleBeamArranger::new(estimator, rng, duration_sec)
+    //single_beam::SingleBeamArranger::new(estimator, rng, duration_sec)
+    multi_beam::MultiBeamArranger::new(&estimator, rng, duration_sec)
 }
