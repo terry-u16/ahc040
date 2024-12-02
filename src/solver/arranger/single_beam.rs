@@ -253,7 +253,7 @@ impl ActGen {
 
                 let p = large_state.placements[i];
 
-                if !(x0.max(p.x0) < x1.min(p.x1)) {
+                if !(x0 < p.x1) {
                     return 0;
                 }
 
@@ -367,7 +367,7 @@ impl ActGen {
 
                 let p = large_state.placements[i];
 
-                if !(y0.max(p.y0) < y1.min(p.y1)) {
+                if !(y0 < p.y1) {
                     return 0;
                 }
 
