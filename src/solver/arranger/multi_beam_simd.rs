@@ -424,14 +424,19 @@ impl ActGen {
         let new_width = _mm256_max_epu16(x1, widths);
         let new_height = _mm256_max_epu16(y1, heights);
 
-        // スコアを水平加算
+        // スコアを計算
+        // width + height の小さいもの4つを取り、それらの和をスコアとする
+        // （期待値を最大化するよりは上振れを狙いたいため）
+        const SCORE_TAKE_CNT: usize = 4;
         let score = _mm256_add_epi16(new_height, new_width);
-        let low = _mm256_extracti128_si256(score, 0);
-        let high = _mm256_extracti128_si256(score, 1);
-        let score = _mm_add_epi16(low, high);
-        let score = _mm_hadd_epi16(score, score);
-        let score = _mm_hadd_epi16(score, score);
-        let score = -(_mm_extract_epi16(score, 0) as i32);
+        let mut scores = [0u16; PARALLEL_CNT];
+        _mm256_storeu_si256(scores.as_mut_ptr() as *mut __m256i, score);
+        scores.sort_unstable();
+        let score = scores
+            .iter()
+            .take(SCORE_TAKE_CNT)
+            .map(|&x| -(x as i32))
+            .sum();
 
         let hash = hash ^ hash_xor;
         let op = Op::new(turn, rotate, Dir::Left, base);
