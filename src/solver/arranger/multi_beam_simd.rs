@@ -10,6 +10,9 @@ use std::arch::x86_64::*;
 
 const PARALLEL_CNT: usize = 16;
 
+/// 多変量正規分布からN個の長方形を16インスタンス生成し、それぞれについて並行に操作を行うビームサーチ。
+/// 考え方は粒子フィルタなどと同じで、非線形性を考慮するために多数のインスタンスでシミュレートする。
+/// 内部的にAVX2を使用して高速化している。
 pub(super) struct MultiBeamArrangerSimd<'a, R: Rng> {
     estimator: &'a Estimator,
     rng: &'a mut R,
@@ -30,11 +33,10 @@ impl<R: Rng> Arranger for MultiBeamArrangerSimd<'_, R> {
     fn arrange(&mut self, input: &Input) -> Vec<Op> {
         let since = std::time::Instant::now();
         let sampler = self.estimator.get_sampler();
-        let parallel_cnt = 16;
 
         let mut rects = vec![[Rect::default(); PARALLEL_CNT]; input.rect_cnt()];
 
-        for i in 0..parallel_cnt {
+        for i in 0..PARALLEL_CNT {
             let rects_i = sampler.sample(self.rng);
 
             for j in 0..input.rect_cnt() {
@@ -354,9 +356,12 @@ impl ActGen {
         };
         let y1 = _mm256_add_epi16(y0, rect_h);
 
+        // 長方形がどこに置かれるかを調べる
         let mut x0 = _mm256_setzero_si256();
 
         for (p_x1, p_y0, p_y1) in izip!(placements_x1, placements_y0, placements_y1) {
+            // やっていることはジャッジコードと同じ
+            //
             // let x = if y0.max(p_y0) < y1.min(p_y1) {
             //     p_x1
             // } else {
@@ -377,6 +382,11 @@ impl ActGen {
         // 側面がピッタリくっついているかチェック
         let is_touching = match base {
             Some(base) => {
+                // if x0.max(p.x0) < x1.min(p.x1) {
+                //     1
+                // } else {
+                //     0
+                // }
                 let p_x0 = placements_x0[base];
                 let p_x1 = placements_x1[base];
                 let max_x0 = _mm256_max_epu16(x0, p_x0);
@@ -390,11 +400,9 @@ impl ActGen {
             }
         };
 
-        // ビットシフトすることで0/1を作る
-        let is_touching_cnt = _mm256_srli_epi16(is_touching, 15);
-
-        // 合計を求める
-        let is_touching_cnt = horizontal_add(is_touching_cnt) as usize;
+        // 右ビットシフトすることで0 or 1を作り、合計を求める
+        let is_touching = _mm256_srli_epi16(is_touching, 15);
+        let is_touching_cnt = horizontal_add(is_touching) as usize;
 
         // ピッタリくっついているものが半分以下だったら中止
         if is_touching_cnt < PARALLEL_CNT / 2 {
@@ -414,7 +422,7 @@ impl ActGen {
         let y_lo_sum = horizontal_add(mul_lo) as u32;
 
         // 適当に並べる
-        // xとyの対称性がないと壊れるので注意
+        // xとyの対称性がないとflip時に壊れるので注意
         let mut hash_xor = ((x_hi_sum ^ y_hi_sum) << 16) | (x_lo_sum ^ y_lo_sum);
 
         if rotate {
@@ -425,9 +433,9 @@ impl ActGen {
         let new_height = _mm256_max_epu16(y1, heights);
 
         // スコアを計算
-        // width + height の小さいもの4つを取り、それらの和をスコアとする
+        // width + height の小さいもの8つを取り、それらの和をスコアとする
         // （期待値を最大化するよりは上振れを狙いたいため）
-        const SCORE_TAKE_CNT: usize = 4;
+        const SCORE_TAKE_CNT: usize = PARALLEL_CNT / 2;
         let score = _mm256_add_epi16(new_height, new_width);
         let mut scores = [0u16; PARALLEL_CNT];
         _mm256_storeu_si256(scores.as_mut_ptr() as *mut __m256i, score);
@@ -475,6 +483,7 @@ impl beam::ActGen<SmallState> for ActGen {
         large_state: &<SmallState as beam::SmallState>::LargeState,
         next_states: &mut Vec<SmallState>,
     ) {
+        // 0ターン目に回転させると、ハッシュが異なるが全く同じ状態が2つできてしまう
         let rotates = if large_state.turn == 0 {
             vec![false]
         } else {
