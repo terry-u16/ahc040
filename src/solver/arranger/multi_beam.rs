@@ -70,7 +70,7 @@ struct LargeState {
     hash: u64,
     hash_base_x: Vec<Vec<u64>>,
     hash_base_y: Vec<Vec<u64>>,
-    hash_base_rot: Vec<Vec<u64>>,
+    hash_base_rot: Vec<u64>,
     turn: usize,
     parallel_cnt: usize,
 }
@@ -90,9 +90,7 @@ impl LargeState {
         let hash_base_y = (0..input.rect_cnt())
             .map(|_| (0..parallel_cnt).map(|_| rng.gen()).collect())
             .collect();
-        let hash_base_rot = (0..input.rect_cnt())
-            .map(|_| (0..parallel_cnt).map(|_| rng.gen()).collect())
-            .collect();
+        let hash_base_rot = (0..input.rect_cnt()).map(|_| rng.gen()).collect();
 
         Self {
             rects,
@@ -250,8 +248,7 @@ impl ActGen {
 
             let hash_x = large_state.hash_base_x[turn][parallel_i].wrapping_mul(x0 as u64);
             let hash_y = large_state.hash_base_y[turn][parallel_i].wrapping_mul(y0 as u64);
-            let hash_rot = large_state.hash_base_rot[turn][parallel_i].wrapping_mul(rotate as u64);
-            hash_xor ^= hash_x ^ hash_y ^ hash_rot;
+            hash_xor ^= hash_x ^ hash_y;
 
             let new_width = x1.max(large_state.widths[parallel_i]);
             let new_height = y1.max(large_state.heights[parallel_i]);
@@ -269,6 +266,12 @@ impl ActGen {
             return None;
         }
 
+        hash_xor ^= if rotate {
+            large_state.hash_base_rot[turn]
+        } else {
+            0
+        };
+        
         let hash = large_state.hash ^ hash_xor;
 
         let op = Op::new(turn, rotate, Dir::Left, base);
@@ -354,8 +357,7 @@ impl ActGen {
 
             let hash_x = large_state.hash_base_x[turn][parallel_i].wrapping_mul(x0 as u64);
             let hash_y = large_state.hash_base_y[turn][parallel_i].wrapping_mul(y0 as u64);
-            let hash_rot = large_state.hash_base_rot[turn][parallel_i].wrapping_mul(rotate as u64);
-            hash_xor ^= hash_x ^ hash_y ^ hash_rot;
+            hash_xor ^= hash_x ^ hash_y;
 
             let new_width = x1.max(large_state.widths[parallel_i]);
             let new_height = y1.max(large_state.heights[parallel_i]);
@@ -372,6 +374,12 @@ impl ActGen {
         if touching_cnt == 0 {
             return None;
         }
+
+        hash_xor ^= if rotate {
+            large_state.hash_base_rot[turn]
+        } else {
+            0
+        };
 
         let hash = large_state.hash ^ hash_xor;
 

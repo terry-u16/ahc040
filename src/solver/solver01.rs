@@ -49,7 +49,7 @@ impl Solver for Solver01 {
         eprintln!("[Final]");
         estimator.dump_estimated(judge.rects());
 
-        let each_duration = (2.9 - input.since().elapsed().as_secs_f64()) / arrange_count as f64 * 10.0;
+        let each_duration = (2.9 - input.since().elapsed().as_secs_f64()) / arrange_count as f64;
 
         for _ in 0..arrange_count {
             let mut arranger = arranger::get_arranger(&mut rng, &estimator, each_duration);
