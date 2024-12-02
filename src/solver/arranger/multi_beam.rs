@@ -4,7 +4,6 @@ use crate::{
     problem::{Dir, Input, Op, Rect},
     solver::estimator::Estimator,
 };
-use itertools::Itertools;
 use rand::Rng;
 
 pub(super) struct MultiBeamArranger<'a, R: Rng> {
@@ -39,29 +38,7 @@ impl<R: Rng> Arranger for MultiBeamArranger<'_, R> {
             }
         }
 
-        const SIGMA: f64 = 4.0;
-
-        let buffer_height = self
-            .estimator
-            .variance_height()
-            .iter()
-            .map(|v| (v.sqrt() * SIGMA).round() as u32)
-            .collect_vec();
-        let buffer_width = self
-            .estimator
-            .variance_height()
-            .iter()
-            .map(|v| (v.sqrt() * SIGMA).round() as u32)
-            .collect_vec();
-
-        let large_state = LargeState::new(
-            input.clone(),
-            rects,
-            buffer_height,
-            buffer_width,
-            parallel_cnt,
-            self.rng,
-        );
+        let large_state = LargeState::new(input.clone(), rects, parallel_cnt, self.rng);
         let small_state = SmallState::default();
         let act_gen = ActGen;
 
@@ -87,11 +64,8 @@ impl<R: Rng> Arranger for MultiBeamArranger<'_, R> {
 #[derive(Debug, Clone)]
 struct LargeState {
     rects: Vec<Vec<Rect>>,
-    buffer_height: Vec<u32>,
-    buffer_width: Vec<u32>,
     widths: Vec<u32>,
     heights: Vec<u32>,
-    interfering_penalty: Vec<u32>,
     placements: Vec<Vec<Placement>>,
     hash: u64,
     hash_base_x: Vec<Vec<u64>>,
@@ -105,14 +79,11 @@ impl LargeState {
     fn new(
         input: Input,
         rects: Vec<Vec<Rect>>,
-        buffer_height: Vec<u32>,
-        buffer_width: Vec<u32>,
         parallel_cnt: usize,
         rng: &mut impl rand::Rng,
     ) -> Self {
         let heights = vec![0; parallel_cnt];
         let widths = vec![0; parallel_cnt];
-        let interfering_penalty = vec![0; parallel_cnt];
         let hash_base_x = (0..input.rect_cnt())
             .map(|_| (0..parallel_cnt).map(|_| rng.gen()).collect())
             .collect();
@@ -125,11 +96,8 @@ impl LargeState {
 
         Self {
             rects,
-            buffer_height,
-            buffer_width,
             widths,
             heights,
-            interfering_penalty,
             placements: vec![],
             hash: 0,
             hash_base_x,
@@ -148,8 +116,6 @@ struct SmallState {
     old_heights: Vec<u32>,
     new_widths: Vec<u32>,
     new_heights: Vec<u32>,
-    old_interfering_penalties: Vec<u32>,
-    new_interfering_penalties: Vec<u32>,
     hash: u64,
     hash_xor: u64,
     op: Op,
@@ -174,9 +140,6 @@ impl beam::SmallState for SmallState {
         state.placements.push(self.placements.clone());
         state.widths.copy_from_slice(&self.new_widths);
         state.heights.copy_from_slice(&self.new_heights);
-        state
-            .interfering_penalty
-            .copy_from_slice(&self.new_interfering_penalties);
         state.hash ^= self.hash_xor;
         state.turn += 1;
     }
@@ -185,10 +148,6 @@ impl beam::SmallState for SmallState {
         state.placements.pop();
         state.widths.copy_from_slice(&self.old_widths);
         state.heights.copy_from_slice(&self.old_heights);
-        state
-            .interfering_penalty
-            .copy_from_slice(&self.old_interfering_penalties);
-
         state.hash ^= self.hash_xor;
         state.turn -= 1;
     }
@@ -237,8 +196,6 @@ impl ActGen {
         let mut new_heights = vec![];
         let mut old_widths = vec![];
         let mut new_widths = vec![];
-        let mut old_interfering_penalties = vec![];
-        let mut new_interfering_penalties = vec![];
         let mut hash_xor = 0;
         let mut score = 0;
 
@@ -288,45 +245,6 @@ impl ActGen {
 
             touching_cnt += is_touching as u32;
 
-            // 干渉の可能性があったら減点
-            let std_dev_me = if rotate {
-                large_state.buffer_width[turn]
-            } else {
-                large_state.buffer_height[turn]
-            };
-
-            let interfering_penalty = (0..large_state.turn)
-                .map(|i| {
-                    if Some(i) == base {
-                        return 0;
-                    }
-
-                    let p = placements[i][parallel_i];
-
-                    if !(x0 < p.x1) {
-                        return 0;
-                    }
-
-                    let std_dev_other = if p.rotate {
-                        large_state.buffer_width[i]
-                    } else {
-                        large_state.buffer_height[i]
-                    };
-
-                    let mut penalty = 0;
-
-                    if p.y1 <= y0 {
-                        penalty += (p.y1 + std_dev_other).saturating_sub(y0);
-                    }
-
-                    if y1 <= p.y0 {
-                        penalty += (y1 + std_dev_me).saturating_sub(p.y0);
-                    }
-
-                    penalty
-                })
-                .sum::<u32>();
-
             let placement = Placement::new(x0, x1, y0, y1, rotate);
             new_placements.push(placement);
 
@@ -337,19 +255,14 @@ impl ActGen {
 
             let new_width = x1.max(large_state.widths[parallel_i]);
             let new_height = y1.max(large_state.heights[parallel_i]);
-            let new_interfering_penalty =
-                large_state.interfering_penalty[parallel_i] + interfering_penalty;
 
             old_heights.push(large_state.heights[parallel_i]);
             old_widths.push(large_state.widths[parallel_i]);
-            old_interfering_penalties.push(large_state.interfering_penalty[parallel_i]);
             new_heights.push(new_height);
             new_widths.push(new_width);
-            new_interfering_penalties.push(new_interfering_penalty);
 
             score -= new_height as i32;
             score -= new_width as i32;
-            score -= interfering_penalty as i32;
         }
 
         if touching_cnt == 0 {
@@ -364,10 +277,8 @@ impl ActGen {
             placements: new_placements,
             old_widths,
             old_heights,
-            old_interfering_penalties,
             new_widths,
             new_heights,
-            new_interfering_penalties,
             hash,
             hash_xor,
             op,
@@ -388,8 +299,6 @@ impl ActGen {
         let mut new_heights = vec![];
         let mut old_widths = vec![];
         let mut new_widths = vec![];
-        let mut old_interfering_penalties = vec![];
-        let mut new_interfering_penalties = vec![];
         let mut hash_xor = 0;
         let mut score = 0;
 
@@ -439,45 +348,6 @@ impl ActGen {
 
             touching_cnt += is_touching as u32;
 
-            // 干渉の可能性があったら減点
-            let std_dev_me = if rotate {
-                large_state.buffer_width[turn]
-            } else {
-                large_state.buffer_height[turn]
-            };
-
-            let interfering_penalty = (0..large_state.turn)
-                .map(|i| {
-                    if Some(i) == base {
-                        return 0;
-                    }
-
-                    let p = placements[i][parallel_i];
-
-                    if !(y0 < p.y1) {
-                        return 0;
-                    }
-
-                    let std_dev_other = if p.rotate {
-                        large_state.buffer_width[i]
-                    } else {
-                        large_state.buffer_height[i]
-                    };
-
-                    let mut penalty = 0;
-
-                    if p.x1 <= x0 {
-                        penalty += (p.x1 + std_dev_other).saturating_sub(x0);
-                    }
-
-                    if x1 <= p.x0 {
-                        penalty += (x1 + std_dev_me).saturating_sub(p.x0);
-                    }
-
-                    penalty
-                })
-                .sum::<u32>();
-
             let placement = Placement::new(x0, x1, y0, y1, rotate);
 
             new_placements.push(placement);
@@ -489,19 +359,14 @@ impl ActGen {
 
             let new_width = x1.max(large_state.widths[parallel_i]);
             let new_height = y1.max(large_state.heights[parallel_i]);
-            let new_interfering_penalty =
-                large_state.interfering_penalty[parallel_i] + interfering_penalty;
 
             old_heights.push(large_state.heights[parallel_i]);
             old_widths.push(large_state.widths[parallel_i]);
-            old_interfering_penalties.push(large_state.interfering_penalty[parallel_i]);
             new_heights.push(new_height);
             new_widths.push(new_width);
-            new_interfering_penalties.push(new_interfering_penalty);
 
             score -= new_height as i32;
             score -= new_width as i32;
-            score -= interfering_penalty as i32;
         }
 
         if touching_cnt == 0 {
@@ -516,10 +381,8 @@ impl ActGen {
             placements: new_placements,
             old_widths,
             old_heights,
-            old_interfering_penalties,
             new_widths,
             new_heights,
-            new_interfering_penalties,
             hash,
             hash_xor,
             op,
