@@ -142,6 +142,22 @@ impl Op {
             base,
         }
     }
+
+    pub fn rect_idx(&self) -> usize {
+        self.rect_idx
+    }
+
+    pub fn rotate(&self) -> bool {
+        self.rotate
+    }
+
+    pub fn dir(&self) -> Dir {
+        self.dir
+    }
+
+    pub fn base(&self) -> Option<usize> {
+        self.base
+    }
 }
 
 impl Display for Op {

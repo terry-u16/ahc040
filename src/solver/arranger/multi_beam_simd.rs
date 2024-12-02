@@ -149,6 +149,22 @@ struct SmallState {
     score: i32,
 }
 
+impl SmallState {
+    fn flip(mut self) -> Self {
+        std::mem::swap(&mut self.placements_x0, &mut self.placements_y0);
+        std::mem::swap(&mut self.placements_x1, &mut self.placements_y1);
+        std::mem::swap(&mut self.old_widths, &mut self.old_heights);
+        std::mem::swap(&mut self.new_widths, &mut self.new_heights);
+        let dir = match self.op.dir() {
+            Dir::Left => Dir::Up,
+            Dir::Up => Dir::Left,
+        };
+
+        self.op = Op::new(self.op.rect_idx(), self.op.rotate(), dir, self.op.base());
+        self
+    }
+}
+
 impl Default for SmallState {
     fn default() -> Self {
         let zero = unsafe { _mm256_setzero_si256() };
@@ -211,35 +227,124 @@ impl beam::SmallState for SmallState {
 struct ActGen;
 
 impl ActGen {
-    #[target_feature(enable = "avx,avx2")]
-    unsafe fn gen_left_cand(
+    fn gen_left_cand(
         &self,
         large_state: &LargeState,
         base: Option<usize>,
         rotate: bool,
     ) -> Option<SmallState> {
         let turn = large_state.turn;
+        let rect_h = large_state.rects_h[turn];
+        let rect_w = large_state.rects_w[turn];
+        let placements_x0 = &large_state.placements_x0;
+        let placements_x1 = &large_state.placements_x1;
+        let placements_y0 = &large_state.placements_y0;
+        let placements_y1 = &large_state.placements_y1;
+        let heights = large_state.heights;
+        let widths = large_state.widths;
+        let hash = large_state.hash;
+        let hash_base_x = &large_state.hash_base_x;
+        let hash_base_y = &large_state.hash_base_y;
+        let hash_base_rot = &large_state.hash_base_rot;
 
-        let mut rect_w = large_state.rects_w[turn];
-        let mut rect_h = large_state.rects_h[turn];
+        unsafe {
+            self.gen_cand(
+                turn,
+                base,
+                rotate,
+                rect_h,
+                rect_w,
+                placements_x0,
+                placements_x1,
+                placements_y0,
+                placements_y1,
+                heights,
+                widths,
+                hash,
+                hash_base_x,
+                hash_base_y,
+                hash_base_rot,
+            )
+        }
+    }
 
+    fn gen_up_cand(
+        &self,
+        large_state: &LargeState,
+        base: Option<usize>,
+        rotate: bool,
+    ) -> Option<SmallState> {
+        // 下からrectを置くので、水平・垂直を入れ替える
+        let turn = large_state.turn;
+        let rect_h = large_state.rects_w[turn];
+        let rect_w = large_state.rects_h[turn];
+        let placements_x0 = &large_state.placements_y0;
+        let placements_x1 = &large_state.placements_y1;
+        let placements_y0 = &large_state.placements_x0;
+        let placements_y1 = &large_state.placements_x1;
+        let heights = large_state.widths;
+        let widths = large_state.heights;
+        let hash = large_state.hash;
+        let hash_base_x = &large_state.hash_base_y;
+        let hash_base_y = &large_state.hash_base_x;
+        let hash_base_rot = &large_state.hash_base_rot;
+
+        let state = unsafe {
+            self.gen_cand(
+                turn,
+                base,
+                rotate,
+                rect_h,
+                rect_w,
+                placements_x0,
+                placements_x1,
+                placements_y0,
+                placements_y1,
+                heights,
+                widths,
+                hash,
+                hash_base_x,
+                hash_base_y,
+                hash_base_rot,
+            )
+        };
+
+        state.map(|s| s.flip())
+    }
+
+    /// 右からrectを置く候補を生成する
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn gen_cand(
+        &self,
+        turn: usize,
+        base: Option<usize>,
+        rotate: bool,
+        mut rect_h: __m256i,
+        mut rect_w: __m256i,
+        placements_x0: &[__m256i],
+        placements_x1: &[__m256i],
+        placements_y0: &[__m256i],
+        placements_y1: &[__m256i],
+        heights: __m256i,
+        widths: __m256i,
+        hash: u64,
+        hash_base_x: &[[u64; PARALLEL_CNT]],
+        hash_base_y: &[[u64; PARALLEL_CNT]],
+        hash_base_rot: &[u64],
+    ) -> Option<SmallState> {
         if rotate {
             std::mem::swap(&mut rect_w, &mut rect_h);
         }
 
         let y0 = match base {
-            Some(index) => large_state.placements_y1[index],
+            Some(index) => placements_y1[index],
             None => _mm256_setzero_si256(),
         };
         let y1 = _mm256_add_epi16(y0, rect_h);
 
         let mut x0 = _mm256_setzero_si256();
 
-        for (p_x1, p_y0, p_y1) in izip!(
-            &large_state.placements_x1,
-            &large_state.placements_y0,
-            &large_state.placements_y1
-        ) {
+        for (p_x1, p_y0, p_y1) in izip!(placements_x1, placements_y0, placements_y1) {
             // let x = if y0.max(p_y0) < y1.min(p_y1) {
             //     p_x1
             // } else {
@@ -260,8 +365,8 @@ impl ActGen {
         // 側面がピッタリくっついているかチェック
         let is_touching = match base {
             Some(base) => {
-                let p_x0 = large_state.placements_x0[base];
-                let p_x1 = large_state.placements_x1[base];
+                let p_x0 = placements_x0[base];
+                let p_x1 = placements_x1[base];
                 let max_x0 = _mm256_max_epu16(x0, p_x0);
                 let min_x1 = _mm256_min_epu16(x1, p_x1);
                 let gt = _mm256_cmpgt_epi16(min_x1, max_x0);
@@ -299,8 +404,8 @@ impl ActGen {
         _mm256_storeu_si256(x_array.as_mut_ptr() as *mut __m256i, x0);
         _mm256_storeu_si256(y_array.as_mut_ptr() as *mut __m256i, y0);
 
-        let hash_base_x = &large_state.hash_base_x[turn];
-        let hash_base_y = &large_state.hash_base_y[turn];
+        let hash_base_x = &hash_base_x[turn];
+        let hash_base_y = &hash_base_y[turn];
 
         for i in 0..PARALLEL_CNT {
             hash_x ^= hash_base_x[i].wrapping_mul(x_array[i] as u64);
@@ -310,11 +415,11 @@ impl ActGen {
         let mut hash_xor = hash_x ^ hash_y;
 
         if rotate {
-            hash_xor ^= large_state.hash_base_rot[turn];
+            hash_xor ^= hash_base_rot[turn];
         }
 
-        let new_width = _mm256_max_epu16(x1, large_state.widths);
-        let new_height = _mm256_max_epu16(y1, large_state.heights);
+        let new_width = _mm256_max_epu16(x1, widths);
+        let new_height = _mm256_max_epu16(y1, heights);
 
         // スコアを水平加算
         let score = _mm256_add_epi16(new_height, new_width);
@@ -325,7 +430,7 @@ impl ActGen {
         let score = _mm_hadd_epi16(score, score);
         let score = -(_mm_extract_epi16(score, 0) as i32);
 
-        let hash = large_state.hash ^ hash_xor;
+        let hash = hash ^ hash_xor;
         let op = Op::new(turn, rotate, Dir::Left, base);
 
         Some(SmallState {
@@ -333,8 +438,8 @@ impl ActGen {
             placements_x1: x1,
             placements_y0: y0,
             placements_y1: y1,
-            old_widths: large_state.widths,
-            old_heights: large_state.heights,
+            old_widths: widths,
+            old_heights: heights,
             new_widths: new_width,
             new_heights: new_height,
             hash,
@@ -342,15 +447,6 @@ impl ActGen {
             op,
             score,
         })
-    }
-
-    fn gen_up_cand(
-        &self,
-        large_state: &LargeState,
-        base: Option<usize>,
-        rotate: bool,
-    ) -> Option<SmallState> {
-        todo!();
     }
 }
 
@@ -367,21 +463,19 @@ impl beam::ActGen<SmallState> for ActGen {
             vec![false, true]
         };
 
-        unsafe {
-            for rotate in rotates {
-                // Left
-                next_states.extend(self.gen_left_cand(&large_state, None, rotate));
+        for rotate in rotates {
+            // Left
+            next_states.extend(self.gen_left_cand(&large_state, None, rotate));
 
-                for i in 0..large_state.turn {
-                    next_states.extend(self.gen_left_cand(&large_state, Some(i), rotate));
-                }
+            for i in 0..large_state.turn {
+                next_states.extend(self.gen_left_cand(&large_state, Some(i), rotate));
+            }
 
-                // Up
-                //next_states.extend(self.gen_up_cand(&large_state, None, rotate));
+            // Up
+            next_states.extend(self.gen_up_cand(&large_state, None, rotate));
 
-                for i in 0..large_state.turn {
-                    //next_states.extend(self.gen_up_cand(&large_state, Some(i), rotate));
-                }
+            for i in 0..large_state.turn {
+                next_states.extend(self.gen_up_cand(&large_state, Some(i), rotate));
             }
         }
     }
