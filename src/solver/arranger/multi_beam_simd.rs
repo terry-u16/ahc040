@@ -42,7 +42,7 @@ impl<R: Rng> Arranger for MultiBeamArrangerSimd<'_, R> {
             }
         }
 
-        let large_state = LargeState::new(input.clone(), rects, self.rng);
+        let large_state = unsafe { LargeState::new(input.clone(), rects, self.rng) };
         let small_state = SmallState::default();
         let act_gen = ActGen;
 
@@ -76,15 +76,20 @@ struct LargeState {
     placements_x1: Vec<__m256i>,
     placements_y0: Vec<__m256i>,
     placements_y1: Vec<__m256i>,
-    hash: u64,
-    hash_base_x: Vec<[u64; PARALLEL_CNT]>,
-    hash_base_y: Vec<[u64; PARALLEL_CNT]>,
-    hash_base_rot: Vec<u64>,
+    hash: u32,
+    hash_base_x: Vec<__m256i>,
+    hash_base_y: Vec<__m256i>,
+    hash_base_rot: Vec<u32>,
     turn: usize,
 }
 
 impl LargeState {
-    fn new(input: Input, rects: Vec<[Rect; PARALLEL_CNT]>, rng: &mut impl rand::Rng) -> Self {
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn new(
+        input: Input,
+        rects: Vec<[Rect; PARALLEL_CNT]>,
+        rng: &mut impl rand::Rng,
+    ) -> Self {
         let zero = unsafe { _mm256_setzero_si256() };
         let rects_h = rects
             .iter()
@@ -101,10 +106,16 @@ impl LargeState {
             })
             .collect_vec();
         let hash_base_x = (0..input.rect_cnt())
-            .map(|_| [0; PARALLEL_CNT].map(|_| rng.gen()))
+            .map(|_| {
+                let v: [u16; PARALLEL_CNT] = [0; PARALLEL_CNT].map(|_| rng.gen());
+                unsafe { _mm256_loadu_si256(v.as_ptr() as *const __m256i) }
+            })
             .collect();
         let hash_base_y = (0..input.rect_cnt())
-            .map(|_| [0; PARALLEL_CNT].map(|_| rng.gen()))
+            .map(|_| {
+                let v: [u16; PARALLEL_CNT] = [0; PARALLEL_CNT].map(|_| rng.gen());
+                unsafe { _mm256_loadu_si256(v.as_ptr() as *const __m256i) }
+            })
             .collect();
         let hash_base_rot = (0..input.rect_cnt()).map(|_| rng.gen()).collect();
         let placements = vec![zero; input.rect_cnt()];
@@ -143,8 +154,8 @@ struct SmallState {
     old_heights: __m256i,
     new_widths: __m256i,
     new_heights: __m256i,
-    hash: u64,
-    hash_xor: u64,
+    hash: u32,
+    hash_xor: u32,
     op: Op,
     score: i32,
 }
@@ -188,7 +199,7 @@ impl Default for SmallState {
 
 impl beam::SmallState for SmallState {
     type Score = i32;
-    type Hash = u64;
+    type Hash = u32;
     type LargeState = LargeState;
     type Action = Op;
 
@@ -313,6 +324,7 @@ impl ActGen {
     }
 
     /// 右からrectを置く候補を生成する
+    /// 下から置く場合はx, yをflipして呼び出し、返り値を再度flipすればよい
     #[target_feature(enable = "avx,avx2")]
     unsafe fn gen_cand(
         &self,
@@ -327,10 +339,10 @@ impl ActGen {
         placements_y1: &[__m256i],
         heights: __m256i,
         widths: __m256i,
-        hash: u64,
-        hash_base_x: &[[u64; PARALLEL_CNT]],
-        hash_base_y: &[[u64; PARALLEL_CNT]],
-        hash_base_rot: &[u64],
+        hash: u32,
+        hash_base_x: &[__m256i],
+        hash_base_y: &[__m256i],
+        hash_base_rot: &[u32],
     ) -> Option<SmallState> {
         if rotate {
             std::mem::swap(&mut rect_w, &mut rect_h);
@@ -382,12 +394,7 @@ impl ActGen {
         let is_touching_cnt = _mm256_srli_epi16(is_touching, 15);
 
         // 合計を求める
-        let low = _mm256_extracti128_si256(is_touching_cnt, 0);
-        let high = _mm256_extracti128_si256(is_touching_cnt, 1);
-        let is_touching_cnt = _mm_add_epi16(low, high);
-        let is_touching_cnt = _mm_hadd_epi16(is_touching_cnt, is_touching_cnt);
-        let is_touching_cnt = _mm_hadd_epi16(is_touching_cnt, is_touching_cnt);
-        let is_touching_cnt = _mm_extract_epi16(is_touching_cnt, 0) as usize;
+        let is_touching_cnt = horizontal_add(is_touching_cnt) as usize;
 
         // ピッタリくっついているものが半分以下だったら中止
         if is_touching_cnt < PARALLEL_CNT / 2 {
@@ -395,24 +402,20 @@ impl ActGen {
         }
 
         // ハッシュ計算
-        let mut hash_x = 0;
-        let mut hash_y = 0;
+        // 16bit * 16bit = 32bit を上位・下位16bitずつに分け、それぞれの和を取る
+        let mul_hi = _mm256_mulhi_epu16(x0, hash_base_x[turn]);
+        let mul_lo = _mm256_mullo_epi16(x0, hash_base_x[turn]);
+        let x_hi_sum = horizontal_add(mul_hi) as u32;
+        let x_lo_sum = horizontal_add(mul_lo) as u32;
 
-        let mut x_array = [0; PARALLEL_CNT];
-        let mut y_array = [0; PARALLEL_CNT];
+        let mul_hi = _mm256_mulhi_epu16(y0, hash_base_y[turn]);
+        let mul_lo = _mm256_mullo_epi16(y0, hash_base_y[turn]);
+        let y_hi_sum = horizontal_add(mul_hi) as u32;
+        let y_lo_sum = horizontal_add(mul_lo) as u32;
 
-        _mm256_storeu_si256(x_array.as_mut_ptr() as *mut __m256i, x0);
-        _mm256_storeu_si256(y_array.as_mut_ptr() as *mut __m256i, y0);
-
-        let hash_base_x = &hash_base_x[turn];
-        let hash_base_y = &hash_base_y[turn];
-
-        for i in 0..PARALLEL_CNT {
-            hash_x ^= hash_base_x[i].wrapping_mul(x_array[i] as u64);
-            hash_y ^= hash_base_y[i].wrapping_mul(y_array[i] as u64);
-        }
-
-        let mut hash_xor = hash_x ^ hash_y;
+        // 適当に並べる
+        // xとyの対称性がないと壊れるので注意
+        let mut hash_xor = ((x_hi_sum ^ y_hi_sum) << 16) | (x_lo_sum ^ y_lo_sum);
 
         if rotate {
             hash_xor ^= hash_base_rot[turn];
@@ -448,6 +451,16 @@ impl ActGen {
             score,
         })
     }
+}
+
+unsafe fn horizontal_add(x: __m256i) -> i32 {
+    let low = _mm256_extracti128_si256(x, 0);
+    let high = _mm256_extracti128_si256(x, 1);
+    let x = _mm_add_epi16(low, high);
+    let x = _mm_hadd_epi16(x, x);
+    let x = _mm_hadd_epi16(x, x);
+    let x = _mm_extract_epi16(x, 0);
+    x
 }
 
 impl beam::ActGen<SmallState> for ActGen {
