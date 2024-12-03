@@ -1,21 +1,18 @@
 mod annealing;
 
-use crate::{
-    problem::{Dir, Input, Op, Rect},
-    util::ChangeMinMax as _,
-};
+use crate::problem::{Input, Op, Rect};
 use itertools::Itertools;
 use nalgebra::{Cholesky, DMatrix, DVector, Matrix1};
 use rand::prelude::*;
 use rand_distr::StandardNormal;
 use rand_pcg::Pcg64Mcg;
 
-pub(super) fn get_placements_randomly(
-    input: &Input,
+pub(super) fn get_placements(
     estimator: &Estimator,
+    duration: f64,
     rng: &mut Pcg64Mcg,
 ) -> (Vec<Op>, DVector<f64>, DVector<f64>) {
-    annealing::solve(estimator, rng)
+    annealing::solve(estimator, duration, rng)
 }
 
 #[derive(Debug, Clone, Copy)]

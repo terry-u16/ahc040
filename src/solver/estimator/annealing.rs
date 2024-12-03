@@ -1,7 +1,7 @@
 use super::Estimator;
 use crate::{
     problem::{Dir, Op, Rect},
-    sa::{self, State as _},
+    sa::{self},
     solver::estimator::Placement,
     util::ChangeMinMax,
 };
@@ -13,12 +13,13 @@ use std::u32;
 
 pub(super) fn solve(
     estimator: &Estimator,
+    duration: f64,
     rng: &mut impl Rng,
 ) -> (Vec<Op>, DVector<f64>, DVector<f64>) {
     let env = Env::new(estimator.clone());
     let state = State::init(&env, rng);
-    let anneler = sa::Annealer::new(1e4, 1e2, 42, 1);
-    let (state, stats) = anneler.run(&env, state, &NeighGen, 0.01);
+    let annealer = sa::Annealer::new(1e4, 1e2, rng.gen(), 1);
+    let (state, stats) = annealer.run(&env, state, &NeighGen, duration);
 
     eprintln!("{}", stats);
 

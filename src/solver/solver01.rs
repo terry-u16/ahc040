@@ -28,10 +28,10 @@ impl Solver for Solver01 {
         estimator.dump_estimated(judge.rects());
 
         let arrange_count = (input.query_cnt() / 5).clamp(5, 10);
+        let duration = 0.3 / (input.query_cnt() - arrange_count) as f64;
 
         for _ in 0..input.query_cnt() - arrange_count {
-            let (ops, edges_v, edges_h) =
-                estimator::get_placements_randomly(input, &estimator, &mut rng);
+            let (ops, edges_v, edges_h) = estimator::get_placements(&estimator, duration, &mut rng);
             let measure = judge.query(&ops);
             let observation_x = Observation::new(measure.width(), edges_h);
             let observation_y = Observation::new(measure.height(), edges_v);
