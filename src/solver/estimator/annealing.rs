@@ -1,7 +1,7 @@
 use super::Estimator;
 use crate::{
     problem::{Dir, Op, Rect},
-    sa::{self},
+    sa::{self, State as _},
     solver::estimator::Placement,
     util::ChangeMinMax,
 };
@@ -17,7 +17,7 @@ pub(super) fn solve(
 ) -> (Vec<Op>, DVector<f64>, DVector<f64>) {
     let env = Env::new(estimator.clone());
     let state = State::init(&env, rng);
-    let anneler = sa::Annealer::new(1e5, 1e2, 42, 1);
+    let anneler = sa::Annealer::new(1e4, 1e2, 42, 1);
     let (state, stats) = anneler.run(&env, state, &NeighGen, 0.01);
 
     eprintln!("{}", stats);
@@ -55,6 +55,19 @@ struct State {
 }
 
 impl State {
+    fn new(env: &Env, placements: Vec<Option<(Dir, bool)>>, pivot: usize) -> Self {
+        let (vec_v, vec_h) = Self::get_box_vec(&env, &placements, pivot);
+        let calculator_v = ScoreCalculator::new(&env.estimator, vec_v);
+        let calculator_h = ScoreCalculator::new(&env.estimator, vec_h);
+
+        Self {
+            placements,
+            pivot,
+            calculator_v,
+            calculator_h,
+        }
+    }
+
     fn init(env: &Env, rng: &mut impl Rng) -> Self {
         let mut placements = (0..env.estimator.rect_cnt)
             .map(|_| {
@@ -69,16 +82,7 @@ impl State {
         placements[0] = Some((Dir::Up, false));
         let pivot = 0;
 
-        let (vec_v, vec_h) = Self::get_box_vec(&env, &placements, pivot);
-        let calculator_v = ScoreCalculator::new(&env.estimator, vec_v);
-        let calculator_h = ScoreCalculator::new(&env.estimator, vec_h);
-
-        Self {
-            placements,
-            pivot,
-            calculator_v,
-            calculator_h,
-        }
+        Self::new(env, placements, pivot)
     }
 
     fn get_box_vec(
@@ -349,7 +353,7 @@ impl sa::Score for ScoreF64 {
 #[derive(Debug, Clone)]
 struct ScoreCalculator {
     v: DVector<f64>,
-    //sigma_c_sum: DVector<f64>,
+    sigma_c_sum: DVector<f64>,
     tr_numerator: f64,
     tr_denominator: f64,
 }
@@ -359,13 +363,36 @@ impl ScoreCalculator {
         let tr_numerator = (&estimator.variance * &v).norm_squared();
         let tr_denominator =
             (v.transpose() * &estimator.variance * &v)[0] + estimator.measure_variance;
-        //let sigma_c_sum = &estimator.variance * &v;
+        let sigma_c_sum = &estimator.variance * &v;
 
         Self {
             v,
-            //sigma_c_sum,
+            sigma_c_sum,
             tr_numerator,
             tr_denominator,
+        }
+    }
+
+    fn update(&mut self, estimator: &Estimator, new_v: &mut DVector<f64>) {
+        let delta = &*new_v - &self.v;
+
+        for (i, &dv) in delta.iter().enumerate() {
+            if dv == 0.0 {
+                continue;
+            }
+
+            self.tr_numerator += 2.0 * dv * (estimator.variance.column(i).dot(&self.sigma_c_sum));
+            self.tr_numerator += dv * dv * estimator.variance.column(i).norm_squared();
+
+            self.tr_denominator += 2.0 * dv * (estimator.variance.column(i).dot(&self.v));
+            self.tr_denominator += dv * dv * estimator.variance[(i, i)];
+
+            self.sigma_c_sum += dv * &estimator.variance.column(i);
+
+            // swapする
+            let temp = new_v[i];
+            new_v[i] = self.v[i];
+            self.v[i] = temp;
         }
     }
 
@@ -402,9 +429,9 @@ impl sa::NeighborGenerator for NeighGen {
 struct ChangeDirNeigh {
     index: usize,
     placement: Option<(Dir, bool)>,
-    placements: Vec<Option<(Dir, bool)>>,
-    calculator_v: ScoreCalculator,
-    calculator_h: ScoreCalculator,
+    old_placement: Option<(Dir, bool)>,
+    vec_v: Option<DVector<f64>>,
+    vec_h: Option<DVector<f64>>,
 }
 
 impl ChangeDirNeigh {
@@ -415,7 +442,7 @@ impl ChangeDirNeigh {
     ) -> Box<dyn sa::Neighbor<Env = Env, State = State>> {
         loop {
             let index = rng.gen_range(0..env.estimator.rect_cnt);
-            let placement = if rng.gen_bool(0.0) && index != state.pivot {
+            let placement = if rng.gen_bool(0.1) && index != state.pivot {
                 None
             } else {
                 let dir = if rng.gen_bool(0.5) {
@@ -436,16 +463,13 @@ impl ChangeDirNeigh {
             if state.placements[index] != placement {
                 let mut placements = state.placements.clone();
                 placements[index] = placement;
-                let (vec_v, vec_h) = State::get_box_vec(&env, &placements, state.pivot);
-                let calculator_v = ScoreCalculator::new(&env.estimator, vec_v);
-                let calculator_h = ScoreCalculator::new(&env.estimator, vec_h);
 
                 return Box::new(Self {
                     index,
                     placement,
-                    placements,
-                    calculator_v,
-                    calculator_h,
+                    old_placement: state.placements[index],
+                    vec_v: None,
+                    vec_h: None,
                 });
             }
         }
@@ -456,20 +480,30 @@ impl sa::Neighbor for ChangeDirNeigh {
     type Env = Env;
     type State = State;
 
-    fn preprocess(&mut self, _env: &Self::Env, state: &mut Self::State) {
-        std::mem::swap(&mut self.placements, &mut state.placements);
-        std::mem::swap(&mut self.calculator_v, &mut state.calculator_v);
-        std::mem::swap(&mut self.calculator_h, &mut state.calculator_h);
+    fn preprocess(&mut self, env: &Self::Env, state: &mut Self::State) {
+        state.placements[self.index] = self.placement;
+
+        let (mut vec_v, mut vec_h) = State::get_box_vec(&env, &state.placements, state.pivot);
+        state.calculator_v.update(&env.estimator, &mut vec_v);
+        state.calculator_h.update(&env.estimator, &mut vec_h);
+
+        self.vec_v = Some(vec_v);
+        self.vec_h = Some(vec_h);
     }
 
     fn postprocess(self: Box<Self>, _env: &Self::Env, _state: &mut Self::State) {
         // do nothing
     }
 
-    fn rollback(mut self: Box<Self>, _env: &Self::Env, state: &mut Self::State) {
-        std::mem::swap(&mut self.placements, &mut state.placements);
-        std::mem::swap(&mut self.calculator_v, &mut state.calculator_v);
-        std::mem::swap(&mut self.calculator_h, &mut state.calculator_h);
+    fn rollback(self: Box<Self>, env: &Self::Env, state: &mut Self::State) {
+        state.placements[self.index] = self.old_placement;
+
+        state
+            .calculator_v
+            .update(&env.estimator, &mut self.vec_v.unwrap());
+        state
+            .calculator_h
+            .update(&env.estimator, &mut self.vec_h.unwrap());
     }
 }
 
@@ -477,9 +511,8 @@ impl sa::Neighbor for ChangeDirNeigh {
 struct ChangePivotNeigh {
     old_pivot: usize,
     new_pivot: usize,
-    placements: Vec<Option<(Dir, bool)>>,
-    calculator_v: ScoreCalculator,
-    calculator_h: ScoreCalculator,
+    vec_v: Option<DVector<f64>>,
+    vec_h: Option<DVector<f64>>,
 }
 
 impl ChangePivotNeigh {
@@ -507,19 +540,13 @@ impl ChangePivotNeigh {
             return None;
         }
 
-        let placements = state.placements.clone();
         let old_pivot = state.pivot;
-
-        let (vec_v, vec_h) = State::get_box_vec(&env, &placements, new_pivot);
-        let calculator_v = ScoreCalculator::new(&env.estimator, vec_v);
-        let calculator_h = ScoreCalculator::new(&env.estimator, vec_h);
 
         Some(Box::new(Self {
             old_pivot,
             new_pivot,
-            placements,
-            calculator_v,
-            calculator_h,
+            vec_v: None,
+            vec_h: None,
         }))
     }
 }
@@ -528,21 +555,29 @@ impl sa::Neighbor for ChangePivotNeigh {
     type Env = Env;
     type State = State;
 
-    fn preprocess(&mut self, _env: &Self::Env, state: &mut Self::State) {
+    fn preprocess(&mut self, env: &Self::Env, state: &mut Self::State) {
         state.pivot = self.new_pivot;
-        std::mem::swap(&mut self.placements, &mut state.placements);
-        std::mem::swap(&mut self.calculator_v, &mut state.calculator_v);
-        std::mem::swap(&mut self.calculator_h, &mut state.calculator_h);
+
+        let (mut vec_v, mut vec_h) = State::get_box_vec(&env, &state.placements, state.pivot);
+        state.calculator_v.update(&env.estimator, &mut vec_v);
+        state.calculator_h.update(&env.estimator, &mut vec_h);
+
+        self.vec_v = Some(vec_v);
+        self.vec_h = Some(vec_h);
     }
 
     fn postprocess(self: Box<Self>, _env: &Self::Env, _state: &mut Self::State) {
         // do nothing
     }
 
-    fn rollback(mut self: Box<Self>, _env: &Self::Env, state: &mut Self::State) {
+    fn rollback(self: Box<Self>, env: &Self::Env, state: &mut Self::State) {
         state.pivot = self.old_pivot;
-        std::mem::swap(&mut self.placements, &mut state.placements);
-        std::mem::swap(&mut self.calculator_v, &mut state.calculator_v);
-        std::mem::swap(&mut self.calculator_h, &mut state.calculator_h);
+
+        state
+            .calculator_v
+            .update(&env.estimator, &mut self.vec_v.unwrap());
+        state
+            .calculator_h
+            .update(&env.estimator, &mut self.vec_h.unwrap());
     }
 }
