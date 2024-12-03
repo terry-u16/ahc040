@@ -20,14 +20,8 @@ impl Solver for Solver01 {
         let mut estimator = Estimator::new(input);
 
         for (i, &rect) in input.rect_measures().iter().enumerate() {
-            estimator.update(&Observation::new(
-                rect.height(),
-                vec![RectEdge::new(i, RectDir::Vertical, 1.0)],
-            ));
-            estimator.update(&Observation::new(
-                rect.width(),
-                vec![RectEdge::new(i, RectDir::Horizontal, 1.0)],
-            ));
+            estimator.update(Observation::single(input, rect.height(), i, false));
+            estimator.update(Observation::single(input, rect.width(), i, true));
         }
 
         eprintln!("[Init]");
@@ -36,14 +30,14 @@ impl Solver for Solver01 {
         let arrange_count = (input.query_cnt() / 5).clamp(5, 10);
 
         for _ in 0..input.query_cnt() - arrange_count {
-            let (ops, edges_h, edges_v) =
+            let (ops, edges_v, edges_h) =
                 estimator::get_placements_randomly(input, &estimator, &mut rng);
             let measure = judge.query(&ops);
             let observation_x = Observation::new(measure.width(), edges_h);
             let observation_y = Observation::new(measure.height(), edges_v);
 
-            estimator.update(&observation_x);
-            estimator.update(&observation_y);
+            estimator.update(observation_x);
+            estimator.update(observation_y);
         }
 
         eprintln!("[Final]");

@@ -2,6 +2,8 @@ use problem::Input;
 use solver::Solver;
 
 #[allow(dead_code)]
+mod sa;
+#[allow(dead_code)]
 mod beam;
 mod problem;
 pub mod solver;
