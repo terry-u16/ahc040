@@ -1,16 +1,15 @@
-use std::u32;
-
-use super::{Estimator, RectDir, RectEdge};
+use super::Estimator;
 use crate::{
-    problem::{Dir, Input, Op, Rect},
-    sa::{self, State as _},
-    solver::estimator::{self, Placement},
+    problem::{Dir, Op, Rect},
+    sa::{self},
+    solver::estimator::Placement,
     util::ChangeMinMax,
 };
 use itertools::Itertools;
 use nalgebra::DVector;
 use rand::prelude::*;
 use smallvec::SmallVec;
+use std::u32;
 
 pub(super) fn solve(
     estimator: &Estimator,
@@ -102,6 +101,11 @@ impl State {
         let mut last_h = None;
         let mut last_v = None;
 
+        let mut max_x = 0;
+        let mut max_y = 0;
+        let mut max_x_i = !0;
+        let mut max_y_i = !0;
+
         const MAX_BOX_SIZE: u32 = 100000;
 
         for (i, dir) in directions.iter().enumerate() {
@@ -119,24 +123,31 @@ impl State {
                         (rect.width(), rect.height(), i)
                     };
 
-                    let x0 = x;
-                    let x1 = x + w;
+                    let x0 = 0;
+                    let x1 = x0 + w;
 
                     if y >= MAX_BOX_SIZE + pivot_y {
                         // 絶対に他の箱と干渉しない
 
                         // pivotの場合は水平方向のrootとなる
                         if pivot == i {
-                            // vec_vにカウントされるかどうかは未確定
                             pivot_y = y;
                             last_h = Some(i);
                             x = x1;
                         }
 
                         y += h;
-                        vec_v[vec_i] = 1.0;
                         parents_v[i] = last_v;
                         last_v = Some(i);
+
+                        if max_x.change_max(x1) {
+                            max_x_i = i;
+                        }
+
+                        if max_y.change_max(y) {
+                            max_y_i = i;
+                        }
+
                         continue;
                     }
 
@@ -173,6 +184,14 @@ impl State {
                     last_v = Some(i);
                     parents_v[i] = parent;
 
+                    if max_x.change_max(x1) {
+                        max_x_i = i;
+                    }
+
+                    if max_y.change_max(y) {
+                        max_y_i = i;
+                    }
+
                     if pivot_y < y0 && y0 < MAX_BOX_SIZE + pivot_y {
                         let pl = Placement::new(x0, x1, y0, y1);
                         placements_h.push((pl, i, vec_i));
@@ -187,15 +206,23 @@ impl State {
 
                     assert!(pivot_y != !0);
 
-                    let y0 = y + pivot_y;
-                    let y1 = y + h;
+                    let y0 = pivot_y;
+                    let y1 = y0 + h;
 
                     if x >= MAX_BOX_SIZE {
                         // 絶対に他の箱と干渉しない
                         x += w;
-                        vec_h[vec_i] = 1.0;
                         parents_h[i] = last_h;
                         last_h = Some(i);
+
+                        if max_x.change_max(x) {
+                            max_x_i = i;
+                        }
+
+                        if max_y.change_max(y1) {
+                            max_y_i = i;
+                        }
+
                         continue;
                     }
 
@@ -223,6 +250,15 @@ impl State {
                     x = x1;
                     last_h = Some(i);
                     parents_h[i] = parent;
+                    parents_v[i] = parents_v[pivot];
+
+                    if max_x.change_max(x) {
+                        max_x_i = i;
+                    }
+
+                    if max_y.change_max(y1) {
+                        max_y_i = i;
+                    }
 
                     if 0 < x0 && x0 < MAX_BOX_SIZE {
                         let pl = Placement::new(x0, x1, y0, y1);
@@ -232,24 +268,28 @@ impl State {
             }
         }
 
-        while let Some(i) = last_v {
+        let mut v = Some(max_y_i);
+
+        while let Some(i) = v {
             let vec_i = if directions[i].unwrap().1 {
                 i + env.estimator.rect_cnt
             } else {
                 i
             };
             vec_v[vec_i] = 1.0;
-            last_v = parents_v[i];
+            v = parents_v[i];
         }
 
-        while let Some(i) = last_h {
+        let mut v = Some(max_x_i);
+
+        while let Some(i) = v {
             let vec_i = if directions[i].unwrap().1 {
                 i
             } else {
                 i + env.estimator.rect_cnt
             };
             vec_h[vec_i] = 1.0;
-            last_h = parents_h[i];
+            v = parents_h[i];
         }
 
         (vec_v, vec_h)
@@ -257,21 +297,23 @@ impl State {
 
     fn to_op_and_edges(&self) -> (Vec<Op>, DVector<f64>, DVector<f64>) {
         let mut ops = vec![];
+        let mut prev = None;
+        let mut base = None;
 
         for (i, &placement) in self.placements.iter().enumerate() {
             let Some((dir, rotate)) = placement else {
                 continue;
             };
 
+            if i == self.pivot {
+                base = prev;
+            }
+
+            prev = Some(i);
+
             let base = match dir {
                 Dir::Up => None,
-                Dir::Left => {
-                    if self.pivot == 0 {
-                        None
-                    } else {
-                        Some(self.pivot - 1)
-                    }
-                }
+                Dir::Left => base,
             };
 
             let op = Op::new(i, rotate, dir, base);
@@ -344,7 +386,15 @@ impl sa::NeighborGenerator for NeighGen {
         state: &Self::State,
         rng: &mut impl Rng,
     ) -> Box<dyn sa::Neighbor<Env = Self::Env, State = Self::State>> {
-        ChangeDirNeigh::gen(env, state, rng)
+        loop {
+            if rng.gen_bool(0.9) {
+                return ChangeDirNeigh::gen(env, state, rng);
+            } else {
+                if let Some(neigh) = ChangePivotNeigh::gen(env, state, rng) {
+                    return neigh;
+                }
+            }
+        }
     }
 }
 
@@ -365,7 +415,7 @@ impl ChangeDirNeigh {
     ) -> Box<dyn sa::Neighbor<Env = Env, State = State>> {
         loop {
             let index = rng.gen_range(0..env.estimator.rect_cnt);
-            let placement = if rng.gen_bool(0.1) && index != 0 {
+            let placement = if rng.gen_bool(0.0) && index != state.pivot {
                 None
             } else {
                 let dir = if rng.gen_bool(0.5) {
@@ -374,7 +424,7 @@ impl ChangeDirNeigh {
                     Dir::Left
                 };
 
-                if index == 0 && dir == Dir::Left {
+                if index <= state.pivot && dir == Dir::Left {
                     continue;
                 }
 
@@ -417,6 +467,80 @@ impl sa::Neighbor for ChangeDirNeigh {
     }
 
     fn rollback(mut self: Box<Self>, _env: &Self::Env, state: &mut Self::State) {
+        std::mem::swap(&mut self.placements, &mut state.placements);
+        std::mem::swap(&mut self.calculator_v, &mut state.calculator_v);
+        std::mem::swap(&mut self.calculator_h, &mut state.calculator_h);
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ChangePivotNeigh {
+    old_pivot: usize,
+    new_pivot: usize,
+    placements: Vec<Option<(Dir, bool)>>,
+    calculator_v: ScoreCalculator,
+    calculator_h: ScoreCalculator,
+}
+
+impl ChangePivotNeigh {
+    fn gen(
+        env: &Env,
+        state: &State,
+        rng: &mut impl Rng,
+    ) -> Option<Box<dyn sa::Neighbor<Env = Env, State = State>>> {
+        let new_pivot = if rng.gen_bool(0.5) {
+            (0..state.pivot)
+                .rev()
+                .filter(|&i| state.placements[i].is_some())
+                .next()
+        } else {
+            (state.pivot + 1..env.estimator.rect_cnt)
+                .filter(|&i| state.placements[i].is_some())
+                .next()
+        };
+
+        let Some(new_pivot) = new_pivot else {
+            return None;
+        };
+
+        if state.placements[new_pivot].unwrap().0 == Dir::Left {
+            return None;
+        }
+
+        let placements = state.placements.clone();
+        let old_pivot = state.pivot;
+
+        let (vec_v, vec_h) = State::get_box_vec(&env, &placements, new_pivot);
+        let calculator_v = ScoreCalculator::new(&env.estimator, vec_v);
+        let calculator_h = ScoreCalculator::new(&env.estimator, vec_h);
+
+        Some(Box::new(Self {
+            old_pivot,
+            new_pivot,
+            placements,
+            calculator_v,
+            calculator_h,
+        }))
+    }
+}
+
+impl sa::Neighbor for ChangePivotNeigh {
+    type Env = Env;
+    type State = State;
+
+    fn preprocess(&mut self, _env: &Self::Env, state: &mut Self::State) {
+        state.pivot = self.new_pivot;
+        std::mem::swap(&mut self.placements, &mut state.placements);
+        std::mem::swap(&mut self.calculator_v, &mut state.calculator_v);
+        std::mem::swap(&mut self.calculator_h, &mut state.calculator_h);
+    }
+
+    fn postprocess(self: Box<Self>, _env: &Self::Env, _state: &mut Self::State) {
+        // do nothing
+    }
+
+    fn rollback(mut self: Box<Self>, _env: &Self::Env, state: &mut Self::State) {
+        state.pivot = self.old_pivot;
         std::mem::swap(&mut self.placements, &mut state.placements);
         std::mem::swap(&mut self.calculator_v, &mut state.calculator_v);
         std::mem::swap(&mut self.calculator_h, &mut state.calculator_h);
