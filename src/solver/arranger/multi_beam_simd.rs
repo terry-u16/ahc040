@@ -122,10 +122,25 @@ impl LargeState {
         let hash_base_rot = (0..input.rect_cnt()).map(|_| rng.gen()).collect();
         let placements = vec![zero; input.rect_cnt()];
 
+        // 最初から幅を確保しておく
+        let mut areas = [0; PARALLEL_CNT];
+
+        for rects in rects.iter() {
+            for (i, rect) in rects.iter().enumerate() {
+                let w = Self::round_u16(rect.width()) as u64;
+                let h = Self::round_u16(rect.height()) as u64;
+                areas[i] += w * h;
+            }
+        }
+
+        // 10%余裕を持たせる
+        let default_width = areas.map(|a| (a as f64 * 1.1).sqrt() as u16);
+        let default_width = unsafe { _mm256_loadu_si256(default_width.as_ptr() as *const __m256i) };
+
         Self {
             rects_h,
             rects_w,
-            widths: zero,
+            widths: default_width,
             heights: zero,
             placements_x0: placements.clone(),
             placements_x1: placements.clone(),
@@ -483,12 +498,7 @@ impl beam::ActGen<SmallState> for ActGen {
         large_state: &<SmallState as beam::SmallState>::LargeState,
         next_states: &mut Vec<SmallState>,
     ) {
-        // 0ターン目に回転させると、ハッシュが異なるが全く同じ状態が2つできてしまう
-        let rotates = if large_state.turn == 0 {
-            vec![false]
-        } else {
-            vec![false, true]
-        };
+        let rotates = [false, true];
 
         for rotate in rotates {
             // Left
