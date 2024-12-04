@@ -44,22 +44,37 @@ impl Solver for Solver01 {
 
         eprintln!("[Final]");
         estimator.dump_estimated(judge.rects());
-        let mut sampler = estimator.get_sampler();
-        let mut sampler = estimator::get_monte_carlo_sampler(input, &mut sampler, &mut rng, 1024);
+        let mut gauss_sampler = estimator.get_sampler();
+        let mut use_monte_carlo = true;
+        let mut monte_carlo_sampler =
+            estimator::get_monte_carlo_sampler(input, &mut gauss_sampler, &mut rng, 1024);
 
         while let Some(observation) = observations.pop() {
-            sampler.update(&observation);
+            // 対数尤度の更新処理は重いので、時間がないときは多変量正規分布バージョンに切り替える
+            if input.since().elapsed().as_millis() >= 1500 {
+                use_monte_carlo = false;
+                break;
+            }
+
+            monte_carlo_sampler.update(&observation);
         }
 
         let each_duration = (2.85 - input.since().elapsed().as_secs_f64()) / arrange_count as f64;
 
         for _ in 0..arrange_count {
             let mut arranger = arranger::get_arranger(each_duration);
-            let ops = arranger.arrange(&input, &mut sampler, &mut rng);
+            let ops = if use_monte_carlo {
+                arranger.arrange(&input, &mut monte_carlo_sampler, &mut rng)
+            } else {
+                arranger.arrange(&input, &mut gauss_sampler, &mut rng)
+            };
 
             let measure = judge.query(&ops);
-            let observation = Observation2d::new(ops, measure.width(), measure.height());
-            sampler.update(&observation);
+
+            if use_monte_carlo {
+                let observation = Observation2d::new(ops, measure.width(), measure.height());
+                monte_carlo_sampler.update(&observation);
+            }
         }
     }
 }
