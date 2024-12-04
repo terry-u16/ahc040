@@ -3,7 +3,8 @@ pub(super) const SIMD_WIDTH: usize = 16;
 pub(super) const fn round_u16(x: u32) -> u16 {
     // 座標の最大値は2^22 = 4_194_304とする（さすがに大丈夫やろ……）
     // これを16bitに収めるためには、6bit右シフトすればよい（64単位で丸められる）
-    (x >> 6) as u16
+    // 事前に1 << 5を足しておくと四捨五入になる
+    ((x + (1 << 5)) >> 6) as u16
 }
 
 #[derive(Debug, Clone)]

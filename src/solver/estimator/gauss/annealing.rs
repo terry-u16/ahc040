@@ -19,9 +19,9 @@ pub(super) fn solve(
     let env = Env::new(estimator.clone());
     let state = State::init(&env, rng);
     let annealer = sa::Annealer::new(1e4, 1e2, rng.gen(), 1);
-    let (state, stats) = annealer.run(&env, state, &NeighGen, duration);
+    let (state, _stats) = annealer.run(&env, state, &NeighGen, duration);
 
-    eprintln!("{}", stats);
+    //eprintln!("{}", stats);
 
     state.to_op_and_edges()
 }

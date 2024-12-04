@@ -166,8 +166,8 @@ impl<'a> GaussSampler<'a> {
     }
 }
 
-impl<'a> Sampler<'a> for GaussSampler<'a> {
-    fn sample(&self, rng: &mut impl Rng) -> SimdRectSet {
+impl Sampler for GaussSampler<'_> {
+    fn sample(&mut self, rng: &mut impl Rng) -> SimdRectSet {
         let mut heights = vec![[0; SIMD_WIDTH]; self.estimator.rect_cnt];
         let mut widths = vec![[0; SIMD_WIDTH]; self.estimator.rect_cnt];
 

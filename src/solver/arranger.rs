@@ -5,13 +5,10 @@ use crate::problem::{Input, Op};
 use rand::Rng;
 
 pub(super) trait Arranger {
-    fn arrange(&mut self, input: &Input) -> Vec<Op>;
+    fn arrange(&mut self, input: &Input, sampler: &mut impl Sampler, rng: &mut impl Rng)
+        -> Vec<Op>;
 }
 
-pub(super) fn get_arranger<'a>(
-    rng: &'a mut impl Rng,
-    sampler: &'a impl Sampler<'a>,
-    duration_sec: f64,
-) -> impl Arranger + 'a {
-    multi_beam_simd::MultiBeamArrangerSimd::new(sampler, rng, duration_sec)
+pub(super) fn get_arranger(duration_sec: f64) -> impl Arranger {
+    multi_beam_simd::MultiBeamArrangerSimd::new(duration_sec)
 }

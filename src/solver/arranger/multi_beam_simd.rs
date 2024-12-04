@@ -14,28 +14,27 @@ use std::arch::x86_64::*;
 /// 多変量正規分布からN個の長方形を16インスタンス生成し、それぞれについて並行に操作を行うビームサーチ。
 /// 考え方は粒子フィルタなどと同じで、非線形性を考慮するために多数のインスタンスでシミュレートする。
 /// 内部的にAVX2を使用して高速化している。
-pub(super) struct MultiBeamArrangerSimd<'a, S: Sampler<'a>, R: Rng> {
-    sampler: &'a S,
-    rng: &'a mut R,
+pub(super) struct MultiBeamArrangerSimd {
     duration_sec: f64,
 }
 
-impl<'a, S: Sampler<'a>, R: Rng> MultiBeamArrangerSimd<'a, S, R> {
-    pub(super) fn new(sampler: &'a S, rng: &'a mut R, duration_sec: f64) -> Self {
-        Self {
-            sampler,
-            rng,
-            duration_sec,
-        }
+impl MultiBeamArrangerSimd {
+    pub(super) fn new(duration_sec: f64) -> Self {
+        Self { duration_sec }
     }
 }
 
-impl<'a, S: Sampler<'a>, R: Rng> Arranger for MultiBeamArrangerSimd<'a, S, R> {
-    fn arrange(&mut self, input: &Input) -> Vec<Op> {
+impl Arranger for MultiBeamArrangerSimd {
+    fn arrange(
+        &mut self,
+        input: &Input,
+        sampler: &mut impl Sampler,
+        rng: &mut impl Rng,
+    ) -> Vec<Op> {
         let since = std::time::Instant::now();
 
-        let rects = self.sampler.sample(self.rng);
-        let large_state = unsafe { LargeState::new(input.clone(), rects, self.rng) };
+        let rects = sampler.sample(rng);
+        let large_state = unsafe { LargeState::new(input.clone(), rects, rng) };
         let small_state = SmallState::default();
         let act_gen = ActGen;
 
@@ -49,7 +48,7 @@ impl<'a, S: Sampler<'a>, R: Rng> Arranger for MultiBeamArrangerSimd<'a, S, R> {
             standard_beam_width,
             1,
             10000,
-            1,
+            0,
         );
         let deduplicator = beam::HashSingleDeduplicator::new();
         let (ops, _) = beam.run(input.rect_cnt(), beam_width_suggester, deduplicator);
