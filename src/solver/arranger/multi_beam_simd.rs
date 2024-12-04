@@ -373,7 +373,7 @@ impl ActGen {
         // 側面がピッタリくっついているかチェック
         let is_touching = match base {
             Some(base) => {
-                // 側面が対象の長方形とmin(w0, w1) / 4以上隣接していることを要求する                
+                // 側面が対象の長方形とmin(w0, w1) / 4以上隣接していることを要求する
                 let p_x0 = placements_x0[base];
                 let p_x1 = placements_x1[base];
 
@@ -401,8 +401,8 @@ impl ActGen {
         let is_touching = _mm256_srli_epi16(is_touching, 15);
         let is_touching_cnt = horizontal_add(is_touching) as usize;
 
-        // ピッタリくっついているものが半分以下だったら中止
-        if is_touching_cnt < SIMD_WIDTH / 2 {
+        // ピッタリくっついていないものがあったらNG
+        if is_touching_cnt < SIMD_WIDTH {
             return None;
         }
 
@@ -474,6 +474,7 @@ unsafe fn horizontal_add(x: __m256i) -> i32 {
     let x = _mm_add_epi16(low, high);
     let x = _mm_hadd_epi16(x, x);
     let x = _mm_hadd_epi16(x, x);
+    let x = _mm_hadd_epi16(x, x);
     let x = _mm_extract_epi16(x, 0);
     x
 }
@@ -501,6 +502,20 @@ impl beam::ActGen<SmallState> for ActGen {
             for i in 0..large_state.turn {
                 next_states.extend(self.gen_up_cand(&large_state, Some(i), rotate));
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn horizontal_add_test() {
+        unsafe {
+            let v = _mm256_setr_epi16(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+            let sum = horizontal_add(v);
+            assert_eq!(sum, 136);
         }
     }
 }
