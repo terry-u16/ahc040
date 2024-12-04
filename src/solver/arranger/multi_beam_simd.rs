@@ -373,16 +373,22 @@ impl ActGen {
         // 側面がピッタリくっついているかチェック
         let is_touching = match base {
             Some(base) => {
-                // if x0.max(p.x0) < x1.min(p.x1) {
-                //     1
-                // } else {
-                //     0
-                // }
+                // 側面が対象の長方形とmin(w0, w1) / 4以上隣接していることを要求する                
                 let p_x0 = placements_x0[base];
                 let p_x1 = placements_x1[base];
+
+                // 隣接長さを求める
                 let max_x0 = _mm256_max_epu16(x0, p_x0);
                 let min_x1 = _mm256_min_epu16(x1, p_x1);
-                let gt = _mm256_cmpgt_epi16(min_x1, max_x0);
+                let touching_len = _mm256_subs_epu16(min_x1, max_x0);
+
+                // min(配置した長方形の幅, 対象の長方形の幅) / 4を要求値とする
+                let p_width = _mm256_sub_epi16(p_x1, p_x0);
+                let min_edge = _mm256_min_epu16(rect_w, p_width);
+                let required_len = _mm256_srli_epi16(min_edge, 2);
+
+                // 要求値と比較
+                let gt = _mm256_cmpgt_epi16(touching_len, required_len);
                 gt
             }
             None => {
