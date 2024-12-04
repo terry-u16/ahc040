@@ -1,4 +1,4 @@
-use super::Estimator;
+use super::GaussEstimator;
 use crate::{
     problem::{Dir, Op, Rect},
     sa::{self},
@@ -12,7 +12,7 @@ use smallvec::SmallVec;
 use std::u32;
 
 pub(super) fn solve(
-    estimator: &Estimator,
+    estimator: &GaussEstimator,
     duration: f64,
     rng: &mut impl Rng,
 ) -> (Vec<Op>, DVector<f64>, DVector<f64>) {
@@ -27,12 +27,12 @@ pub(super) fn solve(
 }
 
 struct Env {
-    estimator: Estimator,
+    estimator: GaussEstimator,
     rects: Vec<Rect>,
 }
 
 impl Env {
-    fn new(estimator: Estimator) -> Self {
+    fn new(estimator: GaussEstimator) -> Self {
         let rects = (0..estimator.rect_cnt)
             .map(|i| {
                 let height = estimator.mean_height()[i].round() as u32;
@@ -360,7 +360,7 @@ struct ScoreCalculator {
 }
 
 impl ScoreCalculator {
-    fn new(estimator: &Estimator, v: DVector<f64>) -> Self {
+    fn new(estimator: &GaussEstimator, v: DVector<f64>) -> Self {
         let tr_numerator = (&estimator.variance * &v).norm_squared();
         let tr_denominator =
             (v.transpose() * &estimator.variance * &v)[0] + estimator.measure_variance;
@@ -374,7 +374,7 @@ impl ScoreCalculator {
         }
     }
 
-    fn update(&mut self, estimator: &Estimator, new_v: &mut DVector<f64>) {
+    fn update(&mut self, estimator: &GaussEstimator, new_v: &mut DVector<f64>) {
         let delta = &*new_v - &self.v;
 
         for (i, &dv) in delta.iter().enumerate() {

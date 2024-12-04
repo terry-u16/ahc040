@@ -1,5 +1,5 @@
 use super::{
-    estimator::{Estimator, Observation, RectDir, RectEdge},
+    estimator::gauss::{GaussEstimator, Observation},
     Solver,
 };
 use crate::{
@@ -17,7 +17,7 @@ pub struct Solver01;
 impl Solver for Solver01 {
     fn solve(&self, input: &Input, mut judge: impl Judge) {
         let mut rng = Pcg64Mcg::from_entropy();
-        let mut estimator = Estimator::new(input);
+        let mut estimator = GaussEstimator::new(input);
 
         for (i, &rect) in input.rect_measures().iter().enumerate() {
             estimator.update(Observation::single(input, rect.height(), i, false));

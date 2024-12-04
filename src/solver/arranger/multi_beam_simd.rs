@@ -2,7 +2,7 @@ use super::Arranger;
 use crate::{
     beam::{self, BayesianBeamWidthSuggester},
     problem::{Dir, Input, Op, Rect},
-    solver::estimator::Estimator,
+    solver::estimator::gauss::GaussEstimator,
 };
 use itertools::{izip, Itertools};
 use rand::Rng;
@@ -14,13 +14,13 @@ const PARALLEL_CNT: usize = 16;
 /// 考え方は粒子フィルタなどと同じで、非線形性を考慮するために多数のインスタンスでシミュレートする。
 /// 内部的にAVX2を使用して高速化している。
 pub(super) struct MultiBeamArrangerSimd<'a, R: Rng> {
-    estimator: &'a Estimator,
+    estimator: &'a GaussEstimator,
     rng: &'a mut R,
     duration_sec: f64,
 }
 
 impl<'a, R: Rng> MultiBeamArrangerSimd<'a, R> {
-    pub(super) fn new(estimator: &'a Estimator, rng: &'a mut R, duration_sec: f64) -> Self {
+    pub(super) fn new(estimator: &'a GaussEstimator, rng: &'a mut R, duration_sec: f64) -> Self {
         Self {
             estimator,
             rng,
