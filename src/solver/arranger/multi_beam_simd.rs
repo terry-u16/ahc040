@@ -448,18 +448,23 @@ impl ActGen {
         let new_height = _mm256_max_epu16(y1, heights);
 
         // スコアを計算
-        // width + height の小さいもの8つを取り、それらの和をスコアとする
+        // スコアの昇順にソートした上で、減衰させながら和を取る
         // （期待値を最大化するよりは上振れを狙いたいため）
-        const SCORE_TAKE_CNT: usize = PARALLEL_CNT / 2;
         let score = _mm256_add_epi16(new_height, new_width);
         let mut scores = [0u16; PARALLEL_CNT];
         _mm256_storeu_si256(scores.as_mut_ptr() as *mut __m256i, score);
         scores.sort_unstable();
-        let score = scores
-            .iter()
-            .take(SCORE_TAKE_CNT)
-            .map(|&x| -(x as i32))
-            .sum();
+
+        let mut mul = 1.0;
+        let mut score = 0.0;
+        const RATE: f64 = 0.9;
+
+        for &x in scores.iter() {
+            score -= x as f64 * mul;
+            mul *= RATE;
+        }
+
+        let score = score.round() as i32;
 
         let hash = hash ^ hash_xor;
         let op = Op::new(turn, rotate, Dir::Left, base);
