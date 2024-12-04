@@ -1,5 +1,5 @@
 use super::{
-    estimator::gauss::{GaussEstimator, Observation},
+    estimator::gauss::{GaussEstimator, Observation1d},
     Solver,
 };
 use crate::{
@@ -20,8 +20,8 @@ impl Solver for Solver01 {
         let mut estimator = GaussEstimator::new(input);
 
         for (i, &rect) in input.rect_measures().iter().enumerate() {
-            estimator.update(Observation::single(input, rect.height(), i, false));
-            estimator.update(Observation::single(input, rect.width(), i, true));
+            estimator.update(Observation1d::single(input, rect.height(), i, false));
+            estimator.update(Observation1d::single(input, rect.width(), i, true));
         }
 
         eprintln!("[Init]");
@@ -33,8 +33,8 @@ impl Solver for Solver01 {
         for _ in 0..input.query_cnt() - arrange_count {
             let (ops, edges_v, edges_h) = estimator::get_placements(&estimator, duration, &mut rng);
             let measure = judge.query(&ops);
-            let observation_x = Observation::new(measure.width(), edges_h);
-            let observation_y = Observation::new(measure.height(), edges_v);
+            let observation_x = Observation1d::new(measure.width(), edges_h);
+            let observation_y = Observation1d::new(measure.height(), edges_v);
 
             estimator.update(observation_x);
             estimator.update(observation_y);
@@ -44,9 +44,10 @@ impl Solver for Solver01 {
         estimator.dump_estimated(judge.rects());
 
         let each_duration = (2.85 - input.since().elapsed().as_secs_f64()) / arrange_count as f64;
+        let sampler = estimator.get_sampler();
 
         for _ in 0..arrange_count {
-            let mut arranger = arranger::get_arranger(&mut rng, &estimator, each_duration);
+            let mut arranger = arranger::get_arranger(&mut rng, &sampler, each_duration);
             let ops = arranger.arrange(&input);
 
             _ = judge.query(&ops);

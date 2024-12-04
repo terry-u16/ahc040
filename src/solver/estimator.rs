@@ -1,5 +1,6 @@
 pub mod gauss;
 
+use super::simd::SimdRectSet;
 use crate::problem::Op;
 use gauss::GaussEstimator;
 use nalgebra::DVector;
@@ -26,5 +27,30 @@ impl Placement {
         assert!(x0 < x1);
         assert!(y0 < y1);
         Self { x0, x1, y0, y1 }
+    }
+}
+
+pub(super) trait Sampler<'a> {
+    fn sample(&self, rng: &mut impl Rng) -> SimdRectSet;
+}
+
+pub(super) trait UpdatableSampler<'a>: Sampler<'a> {
+    fn update(&mut self, observation: &Observation2d);
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct Observation2d {
+    operations: Vec<Op>,
+    len_x: u32,
+    len_y: u32,
+}
+
+impl Observation2d {
+    pub(super) fn new(operations: Vec<Op>, len_x: u32, len_y: u32) -> Self {
+        Self {
+            operations,
+            len_x,
+            len_y,
+        }
     }
 }

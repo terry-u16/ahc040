@@ -1,49 +1,40 @@
 use super::Arranger;
 use crate::{
     beam::{self, BayesianBeamWidthSuggester},
-    problem::{Dir, Input, Op, Rect},
-    solver::estimator::gauss::GaussEstimator,
+    problem::{Dir, Input, Op},
+    solver::{
+        estimator::Sampler,
+        simd::{SimdRectSet, SIMD_WIDTH},
+    },
 };
 use itertools::{izip, Itertools};
 use rand::Rng;
 use std::arch::x86_64::*;
 
-const PARALLEL_CNT: usize = 16;
-
 /// 多変量正規分布からN個の長方形を16インスタンス生成し、それぞれについて並行に操作を行うビームサーチ。
 /// 考え方は粒子フィルタなどと同じで、非線形性を考慮するために多数のインスタンスでシミュレートする。
 /// 内部的にAVX2を使用して高速化している。
-pub(super) struct MultiBeamArrangerSimd<'a, R: Rng> {
-    estimator: &'a GaussEstimator,
+pub(super) struct MultiBeamArrangerSimd<'a, S: Sampler<'a>, R: Rng> {
+    sampler: &'a S,
     rng: &'a mut R,
     duration_sec: f64,
 }
 
-impl<'a, R: Rng> MultiBeamArrangerSimd<'a, R> {
-    pub(super) fn new(estimator: &'a GaussEstimator, rng: &'a mut R, duration_sec: f64) -> Self {
+impl<'a, S: Sampler<'a>, R: Rng> MultiBeamArrangerSimd<'a, S, R> {
+    pub(super) fn new(sampler: &'a S, rng: &'a mut R, duration_sec: f64) -> Self {
         Self {
-            estimator,
+            sampler,
             rng,
             duration_sec,
         }
     }
 }
 
-impl<R: Rng> Arranger for MultiBeamArrangerSimd<'_, R> {
+impl<'a, S: Sampler<'a>, R: Rng> Arranger for MultiBeamArrangerSimd<'a, S, R> {
     fn arrange(&mut self, input: &Input) -> Vec<Op> {
         let since = std::time::Instant::now();
-        let sampler = self.estimator.get_sampler();
 
-        let mut rects = vec![[Rect::default(); PARALLEL_CNT]; input.rect_cnt()];
-
-        for i in 0..PARALLEL_CNT {
-            let rects_i = sampler.sample(self.rng);
-
-            for j in 0..input.rect_cnt() {
-                rects[j][i] = rects_i[j];
-            }
-        }
-
+        let rects = self.sampler.sample(self.rng);
         let large_state = unsafe { LargeState::new(input.clone(), rects, self.rng) };
         let small_state = SmallState::default();
         let act_gen = ActGen;
@@ -87,35 +78,27 @@ struct LargeState {
 
 impl LargeState {
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn new(
-        input: Input,
-        rects: Vec<[Rect; PARALLEL_CNT]>,
-        rng: &mut impl rand::Rng,
-    ) -> Self {
+    unsafe fn new(input: Input, rects: SimdRectSet, rng: &mut impl rand::Rng) -> Self {
         let zero = unsafe { _mm256_setzero_si256() };
         let rects_h = rects
+            .heights
             .iter()
-            .map(|rect| {
-                let h = rect.map(|r| Self::round_u16(r.height()));
-                unsafe { _mm256_loadu_si256(h.as_ptr() as *const __m256i) }
-            })
+            .map(|rect| unsafe { _mm256_loadu_si256(rect.as_ptr() as *const __m256i) })
             .collect_vec();
         let rects_w = rects
+            .widths
             .iter()
-            .map(|rect| {
-                let w = rect.map(|r| Self::round_u16(r.width()));
-                unsafe { _mm256_loadu_si256(w.as_ptr() as *const __m256i) }
-            })
+            .map(|rect| unsafe { _mm256_loadu_si256(rect.as_ptr() as *const __m256i) })
             .collect_vec();
         let hash_base_x = (0..input.rect_cnt())
             .map(|_| {
-                let v: [u16; PARALLEL_CNT] = [0; PARALLEL_CNT].map(|_| rng.gen());
+                let v: [u16; SIMD_WIDTH] = [0; SIMD_WIDTH].map(|_| rng.gen());
                 unsafe { _mm256_loadu_si256(v.as_ptr() as *const __m256i) }
             })
             .collect();
         let hash_base_y = (0..input.rect_cnt())
             .map(|_| {
-                let v: [u16; PARALLEL_CNT] = [0; PARALLEL_CNT].map(|_| rng.gen());
+                let v: [u16; SIMD_WIDTH] = [0; SIMD_WIDTH].map(|_| rng.gen());
                 unsafe { _mm256_loadu_si256(v.as_ptr() as *const __m256i) }
             })
             .collect();
@@ -123,18 +106,18 @@ impl LargeState {
         let placements = vec![zero; input.rect_cnt()];
 
         // 最初から幅を確保しておく
-        let mut areas = [0; PARALLEL_CNT];
+        let mut areas = [0; SIMD_WIDTH];
 
-        for rects in rects.iter() {
-            for (i, rect) in rects.iter().enumerate() {
-                let w = Self::round_u16(rect.width()) as u64;
-                let h = Self::round_u16(rect.height()) as u64;
+        for (h, w) in izip!(&rects.heights, &rects.widths) {
+            for i in 0..SIMD_WIDTH {
+                let w = w[i] as u64;
+                let h = h[i] as u64;
                 areas[i] += w * h;
             }
         }
 
         // 10%余裕を持たせる
-        let default_width = areas.map(|a| (a as f64 * 1.1).sqrt() as u16);
+        let default_width: [u16; 16] = areas.map(|a| (a as f64 * 1.1).sqrt() as u16);
         let default_width = unsafe { _mm256_loadu_si256(default_width.as_ptr() as *const __m256i) };
 
         Self {
@@ -152,12 +135,6 @@ impl LargeState {
             hash_base_rot,
             turn: 0,
         }
-    }
-
-    const fn round_u16(x: u32) -> u16 {
-        // 座標の最大値は2^22 = 4_194_304とする（さすがに大丈夫やろ……）
-        // これを16bitに収めるためには、6bit右シフトすればよい（64単位で丸められる）
-        (x >> 6) as u16
     }
 }
 
@@ -420,7 +397,7 @@ impl ActGen {
         let is_touching_cnt = horizontal_add(is_touching) as usize;
 
         // ピッタリくっついているものが半分以下だったら中止
-        if is_touching_cnt < PARALLEL_CNT / 2 {
+        if is_touching_cnt < SIMD_WIDTH / 2 {
             return None;
         }
 
@@ -451,7 +428,7 @@ impl ActGen {
         // スコアの昇順にソートした上で、減衰させながら和を取る
         // （期待値を最大化するよりは上振れを狙いたいため）
         let score = _mm256_add_epi16(new_height, new_width);
-        let mut scores = [0u16; PARALLEL_CNT];
+        let mut scores = [0u16; SIMD_WIDTH];
         _mm256_storeu_si256(scores.as_mut_ptr() as *mut __m256i, score);
         scores.sort_unstable();
 

@@ -1,6 +1,7 @@
 pub mod solver01;
 mod estimator;
 mod arranger;
+mod simd;
 
 use crate::problem::{Input, Judge};
 

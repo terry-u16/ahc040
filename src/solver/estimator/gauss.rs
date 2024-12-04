@@ -1,6 +1,10 @@
 mod annealing;
 
-use crate::problem::{Input, Op, Rect};
+use super::Sampler;
+use crate::{
+    problem::{Input, Op, Rect},
+    solver::simd::{round_u16, SimdRectSet, SIMD_WIDTH},
+};
 use itertools::Itertools as _;
 use nalgebra::{Cholesky, DMatrix, DVector, Matrix1};
 use rand::prelude::*;
@@ -42,7 +46,7 @@ impl GaussEstimator {
         }
     }
 
-    pub fn update(&mut self, observation: Observation) {
+    pub fn update(&mut self, observation: Observation1d) {
         let y = Matrix1::new(observation.len as f64);
         let c = observation.edges;
 
@@ -129,12 +133,12 @@ impl GaussEstimator {
 }
 
 #[derive(Debug, Clone)]
-pub struct Observation {
+pub struct Observation1d {
     len: u32,
     edges: DVector<f64>,
 }
 
-impl Observation {
+impl Observation1d {
     pub fn new(len: u32, edges: DVector<f64>) -> Self {
         Self { len, edges }
     }
@@ -160,22 +164,28 @@ impl<'a> GaussSampler<'a> {
             cholesky,
         }
     }
+}
 
-    pub fn sample(&self, rng: &mut impl Rng) -> Vec<Rect> {
-        let dist = StandardNormal;
-        let values: Vec<f64> = (0..self.estimator.mean.len())
-            .map(|_| dist.sample(rng))
-            .collect_vec();
-        let values = &self.cholesky.l() * DVector::from_vec(values) + &self.estimator.mean;
+impl<'a> Sampler<'a> for GaussSampler<'a> {
+    fn sample(&self, rng: &mut impl Rng) -> SimdRectSet {
+        let mut heights = vec![[0; SIMD_WIDTH]; self.estimator.rect_cnt];
+        let mut widths = vec![[0; SIMD_WIDTH]; self.estimator.rect_cnt];
 
-        let mut rects = Vec::with_capacity(self.estimator.rect_cnt);
+        for simd_i in 0..SIMD_WIDTH {
+            let dist = StandardNormal;
+            let values: Vec<f64> = (0..self.estimator.mean.len())
+                .map(|_| dist.sample(rng))
+                .collect_vec();
+            let values = &self.cholesky.l() * DVector::from_vec(values) + &self.estimator.mean;
 
-        for i in 0..self.estimator.rect_cnt {
-            let height = (values[i].round() as u32).clamp(20000, 100000);
-            let width = (values[i + self.estimator.rect_cnt] as u32).clamp(20000, 100000);
-            rects.push(Rect::new(height, width));
+            for rect_i in 0..self.estimator.rect_cnt {
+                let height = (values[rect_i].round() as u32).clamp(20000, 100000);
+                let width = (values[rect_i + self.estimator.rect_cnt] as u32).clamp(20000, 100000);
+                heights[rect_i][simd_i] = round_u16(height);
+                widths[rect_i][simd_i] = round_u16(width);
+            }
         }
 
-        rects
+        SimdRectSet::new(heights, widths)
     }
 }
