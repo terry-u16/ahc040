@@ -76,6 +76,8 @@ struct LargeState {
     turn: usize,
     avaliable_base_left: u128,
     avaliable_base_up: u128,
+    avaliable_collision_left: u128,
+    avaliable_collision_up: u128,
 }
 
 impl LargeState {
@@ -138,6 +140,8 @@ impl LargeState {
             turn: 0,
             avaliable_base_left: 0,
             avaliable_base_up: 0,
+            avaliable_collision_left: 0,
+            avaliable_collision_up: 0,
         }
     }
 }
@@ -158,6 +162,8 @@ struct SmallState {
     score: i32,
     avaliable_base_left_xor: u128,
     avaliable_base_up_xor: u128,
+    avaliable_collision_left_xor: u128,
+    avaliable_collision_up_xor: u128,
 }
 
 impl SmallState {
@@ -169,6 +175,10 @@ impl SmallState {
         std::mem::swap(
             &mut self.avaliable_base_left_xor,
             &mut self.avaliable_base_up_xor,
+        );
+        std::mem::swap(
+            &mut self.avaliable_collision_left_xor,
+            &mut self.avaliable_collision_up_xor,
         );
         let dir = match self.op.dir() {
             Dir::Left => Dir::Up,
@@ -199,6 +209,8 @@ impl Default for SmallState {
             score: Default::default(),
             avaliable_base_left_xor: Default::default(),
             avaliable_base_up_xor: Default::default(),
+            avaliable_collision_left_xor: Default::default(),
+            avaliable_collision_up_xor: Default::default(),
         }
     }
 }
@@ -228,6 +240,8 @@ impl beam::SmallState for SmallState {
         state.turn += 1;
         state.avaliable_base_left ^= self.avaliable_base_left_xor;
         state.avaliable_base_up ^= self.avaliable_base_up_xor;
+        state.avaliable_collision_left ^= self.avaliable_collision_left_xor;
+        state.avaliable_collision_up ^= self.avaliable_collision_up_xor;
     }
 
     fn rollback(&self, state: &mut Self::LargeState) {
@@ -238,6 +252,8 @@ impl beam::SmallState for SmallState {
         state.turn -= 1;
         state.avaliable_base_left ^= self.avaliable_base_left_xor;
         state.avaliable_base_up ^= self.avaliable_base_up_xor;
+        state.avaliable_collision_left ^= self.avaliable_collision_left_xor;
+        state.avaliable_collision_up ^= self.avaliable_collision_up_xor;
     }
 
     fn action(&self) -> Self::Action {
@@ -255,6 +271,8 @@ impl ActGen {
         rotate: bool,
         available_base_left_xor: u128,
         available_base_up_xor: u128,
+        available_collision_left_xor: u128,
+        available_collision_up_xor: u128,
     ) -> Option<SmallState> {
         let turn = large_state.turn;
         let rect_h = large_state.rects_h[turn];
@@ -269,6 +287,8 @@ impl ActGen {
         let hash_base_x = &large_state.hash_base_x;
         let hash_base_y = &large_state.hash_base_y;
         let hash_base_rot = &large_state.hash_base_rot;
+        let available_collision_left =
+            large_state.avaliable_collision_left ^ available_collision_left_xor;
 
         unsafe {
             self.gen_cand(
@@ -289,6 +309,9 @@ impl ActGen {
                 hash_base_rot,
                 available_base_left_xor,
                 available_base_up_xor,
+                available_collision_left,
+                available_collision_left_xor,
+                available_collision_up_xor,
             )
         }
     }
@@ -300,6 +323,8 @@ impl ActGen {
         rotate: bool,
         available_base_left_xor: u128,
         available_base_up_xor: u128,
+        avaliable_collision_left_xor: u128,
+        avaliable_collision_up_xor: u128,
     ) -> Option<SmallState> {
         // 下からrectを置くので、水平・垂直を入れ替える
         let turn = large_state.turn;
@@ -317,6 +342,10 @@ impl ActGen {
         let hash_base_rot = &large_state.hash_base_rot;
         let (available_base_left_xor, available_base_up_xor) =
             (available_base_up_xor, available_base_left_xor);
+        let available_collision_left =
+            large_state.avaliable_collision_up ^ avaliable_collision_up_xor;
+        let (available_collision_left_xor, available_collision_up_xor) =
+            (avaliable_collision_up_xor, avaliable_collision_left_xor);
 
         let state = unsafe {
             self.gen_cand(
@@ -337,6 +366,9 @@ impl ActGen {
                 hash_base_rot,
                 available_base_left_xor,
                 available_base_up_xor,
+                available_collision_left,
+                available_collision_left_xor,
+                available_collision_up_xor,
             )
         };
 
@@ -365,6 +397,9 @@ impl ActGen {
         hash_base_rot: &[u32],
         available_base_left_xor: u128,
         available_base_up_xor: u128,
+        available_collision_left: u128,
+        available_collision_left_xor: u128,
+        available_collision_up_xor: u128,
     ) -> Option<SmallState> {
         if rotate {
             std::mem::swap(&mut rect_w, &mut rect_h);
@@ -379,7 +414,7 @@ impl ActGen {
         // 長方形がどこに置かれるかを調べる
         let mut x0 = _mm256_setzero_si256();
 
-        for (p_x1, p_y0, p_y1) in izip!(placements_x1, placements_y0, placements_y1) {
+        for rect_i in BitSetIterU128::new(available_collision_left) {
             // やっていることはジャッジコードと同じ
             //
             // let x = if y0.max(p_y0) < y1.min(p_y1) {
@@ -389,11 +424,14 @@ impl ActGen {
             // };
             //
             // x0 = x0.max(x);
-            let max_y0 = _mm256_max_epu16(y0, *p_y0);
-            let min_y1 = _mm256_min_epu16(y1, *p_y1);
+            let p_x1 = placements_x1[rect_i];
+            let p_y0 = placements_y0[rect_i];
+            let p_y1 = placements_y1[rect_i];
+            let max_y0 = _mm256_max_epu16(y0, p_y0);
+            let min_y1 = _mm256_min_epu16(y1, p_y1);
 
             let gt = _mm256_cmpgt_epi16(min_y1, max_y0);
-            let x = _mm256_and_si256(*p_x1, gt);
+            let x = _mm256_and_si256(p_x1, gt);
             x0 = _mm256_max_epu16(x0, x);
         }
 
@@ -482,6 +520,8 @@ impl ActGen {
 
         let avaliable_base_left_xor = available_base_left_xor | (1 << turn);
         let avaliable_base_up_xor = available_base_up_xor | (1 << turn);
+        let avaliable_collision_left_xor = available_collision_left_xor | (1 << turn);
+        let avaliable_collision_up_xor = available_collision_up_xor | (1 << turn);
 
         Some(SmallState {
             placements_x0: x0,
@@ -498,6 +538,8 @@ impl ActGen {
             score,
             avaliable_base_left_xor,
             avaliable_base_up_xor,
+            avaliable_collision_left_xor,
+            avaliable_collision_up_xor,
         })
     }
 
@@ -579,9 +621,6 @@ impl ActGen {
                 // Yi1 + MIN_EDGE_LEN
                 let yi1pl0 = _mm256_add_epi16(yi1, min_edge_len);
 
-                // 新しく無効となった箱フラグ
-                let mut invalid = _mm256_setzero_si256();
-
                 // max(yi1, yj0) < min(yi1 + l0, yj1)
                 let max = _mm256_max_epu16(yi1, new_y0);
                 let min = _mm256_min_epu16(yi1pl0, new_y1);
@@ -590,11 +629,103 @@ impl ActGen {
                 // x_i1 ≦ x_j1
                 // AVX2に整数の≦はないので、x_i1 > x_j1 を求めたあとにAND_NOTを取る
                 let pred_x_not = _mm256_cmpgt_epi16(xi1, new_x1);
-                let pred = _mm256_andnot_si256(pred_x_not, pred_y);
-                invalid = _mm256_or_si256(invalid, pred);
+
+                // 新しく無効となった箱フラグ
+                let invalid = _mm256_andnot_si256(pred_x_not, pred_y);
 
                 // invalidなものが1つでもあったらピッタリくっつけられないのでNG
                 let is_invalid = horizontal_or(invalid) > 0;
+                invalid_flag |= (is_invalid as u128) << rect_i;
+            }
+
+            invalid_flag
+        }
+    }
+
+    fn get_invalid_collisions_left(large_state: &LargeState, turn: usize) -> u128 {
+        if turn == 0 {
+            return 0;
+        }
+
+        let prev_turn = turn - 1;
+        let placements_x1 = &large_state.placements_x1[..prev_turn];
+        let placements_y1 = &large_state.placements_y1[..prev_turn];
+        let new_x1 = large_state.placements_x1[prev_turn];
+        let new_y0 = large_state.placements_y0[prev_turn];
+        let new_y1 = large_state.placements_y1[prev_turn];
+
+        // prev_turnに置いたrectは必ずvalidなので対象外とする
+        let collision_flag = large_state.avaliable_collision_left & !(1 << prev_turn);
+
+        unsafe {
+            Self::get_invalid_collisions(
+                placements_x1,
+                placements_y1,
+                new_x1,
+                new_y0,
+                new_y1,
+                collision_flag,
+            )
+        }
+    }
+
+    fn get_invalid_collisions_up(large_state: &LargeState, turn: usize) -> u128 {
+        if turn == 0 {
+            return 0;
+        }
+
+        // x, yを反転させて呼び出す
+        let prev_turn = turn - 1;
+        let placements_x1 = &large_state.placements_y1[..prev_turn];
+        let placements_y1 = &large_state.placements_x1[..prev_turn];
+        let new_x1 = large_state.placements_y1[prev_turn];
+        let new_y0 = large_state.placements_x0[prev_turn];
+        let new_y1 = large_state.placements_x1[prev_turn];
+
+        // prev_turnに置いたrectは必ずvalidなので対象外とする
+        let collision_flag = large_state.avaliable_collision_up & !(1 << prev_turn);
+
+        unsafe {
+            Self::get_invalid_collisions(
+                placements_x1,
+                placements_y1,
+                new_x1,
+                new_y0,
+                new_y1,
+                collision_flag,
+            )
+        }
+    }
+
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn get_invalid_collisions(
+        placements_x1: &[__m256i],
+        placements_y1: &[__m256i],
+        new_x1: __m256i,
+        new_y0: __m256i,
+        new_y1: __m256i,
+        collision_flag: u128,
+    ) -> u128 {
+        unsafe {
+            let mut invalid_flag = 0;
+
+            for rect_i in BitSetIterU128::new(collision_flag) {
+                let xi1 = placements_x1[rect_i];
+                let yi1 = placements_y1[rect_i];
+
+                // 上側から被っている領域
+                // a_i = y_j1 if x_i1 < x_j1 and y_j0 < y_i1 else 0
+                let x_gt = _mm256_cmpgt_epi16(new_x1, xi1);
+                let y_gt = _mm256_cmpgt_epi16(yi1, new_y0);
+                let pred = _mm256_and_si256(x_gt, y_gt);
+                let y_top = _mm256_and_si256(pred, new_y1);
+
+                // 右側面に露出している長さが0以上であることを要求する
+                let valid = _mm256_cmpgt_epi16(yi1, y_top);
+
+                // 全てinvalidだったら見る必要なし
+                // これで弾かれず漏れる可能性もあるが、安全側なので許容する
+                let is_invalid = horizontal_or(valid) == 0;
                 invalid_flag |= (is_invalid as u128) << rect_i;
             }
 
@@ -616,6 +747,11 @@ impl beam::ActGen<SmallState> for ActGen {
         let avaliable_bases_left = large_state.avaliable_base_left & !invalid_bases_left;
         let avaliable_bases_up = large_state.avaliable_base_up & !invalid_bases_up;
 
+        // 見なくて良い衝突判定の列挙
+        let invalid_collisions_left =
+            Self::get_invalid_collisions_left(large_state, large_state.turn);
+        let invalid_collisions_up = Self::get_invalid_collisions_up(large_state, large_state.turn);
+
         // 生成
         let rotates = [false, true];
 
@@ -627,6 +763,8 @@ impl beam::ActGen<SmallState> for ActGen {
                 rotate,
                 invalid_bases_left,
                 invalid_bases_up,
+                invalid_collisions_left,
+                invalid_collisions_up,
             ));
 
             for i in BitSetIterU128::new(avaliable_bases_left) {
@@ -636,6 +774,8 @@ impl beam::ActGen<SmallState> for ActGen {
                     rotate,
                     invalid_bases_left,
                     invalid_bases_up,
+                    invalid_collisions_left,
+                    invalid_collisions_up,
                 ));
             }
 
@@ -646,6 +786,8 @@ impl beam::ActGen<SmallState> for ActGen {
                 rotate,
                 invalid_bases_left,
                 invalid_bases_up,
+                invalid_collisions_left,
+                invalid_collisions_up,
             ));
 
             for i in BitSetIterU128::new(avaliable_bases_up) {
@@ -655,6 +797,8 @@ impl beam::ActGen<SmallState> for ActGen {
                     rotate,
                     invalid_bases_left,
                     invalid_bases_up,
+                    invalid_collisions_left,
+                    invalid_collisions_up,
                 ));
             }
         }

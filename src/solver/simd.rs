@@ -36,6 +36,20 @@ pub fn horizontal_or(x: __m256i) -> u16 {
     }
 }
 
+pub fn horizontal_and(x: __m256i) -> u16 {
+    unsafe {
+        let low = _mm256_castsi256_si128(x);
+        let high = _mm256_extracti128_si256(x, 1);
+        let x = _mm_and_si128(low, high);
+
+        let x = _mm_and_si128(x, _mm_srli_si128::<2>(x));
+        let x = _mm_and_si128(x, _mm_srli_si128::<4>(x));
+        let x = _mm_and_si128(x, _mm_srli_si128::<8>(x));
+        let x = _mm_extract_epi16(x, 0);
+        x as u16
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct SimdRectSet {
     /// 長方形の幅を16bit x 16個packしたもの
@@ -85,6 +99,20 @@ mod test {
             let x: [i16; 16] = core::array::from_fn(|_| rng.gen::<i16>() & result);
             let x = unsafe { _mm256_loadu_si256(x.as_ptr() as *const __m256i) };
             let or = horizontal_or(x);
+
+            assert_eq!(or, result as u16);
+        }
+    }
+
+    #[test]
+    fn horizontal_and_test() {
+        let mut rng = thread_rng();
+
+        for _ in 0..100 {
+            let result = rng.gen::<i16>();
+            let x: [i16; 16] = core::array::from_fn(|_| rng.gen::<i16>() | result);
+            let x = unsafe { _mm256_loadu_si256(x.as_ptr() as *const __m256i) };
+            let or = horizontal_and(x);
 
             assert_eq!(or, result as u16);
         }
