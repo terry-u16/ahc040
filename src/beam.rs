@@ -100,14 +100,15 @@ pub trait ActGen<S: SmallState> {
 }
 
 /// ビームの次の遷移候補
-struct Cancidate<S: SmallState> {
+#[derive(Clone)]
+struct Cancidate<S: SmallState + Clone> {
     /// 実行後のsmall_state
     small_state: S,
     /// 親となるノードのインデックス
     parent: NodeIndex,
 }
 
-impl<S: SmallState> Cancidate<S> {
+impl<S: SmallState + Clone> Cancidate<S> {
     fn new(small_state: S, parent: NodeIndex) -> Self {
         Self {
             small_state,
@@ -573,6 +574,7 @@ impl<S: SmallState + Default + Clone, G: ActGen<S>> BeamSearch<S, G> {
         self.init(small_state);
 
         let mut candidates = vec![];
+        let mut indices = vec![];
 
         for turn in 0..max_turn {
             let beam_width = beam_width_suggester.suggest();
@@ -590,13 +592,17 @@ impl<S: SmallState + Default + Clone, G: ActGen<S>> BeamSearch<S, G> {
             );
 
             // 重複除去を行ったのち、次の遷移先を確定させる
-            // glidesortが速いらしいが、多様性を確保したいため敢えて不安定ソートを採用している
-            candidates.sort_unstable_by_key(|c| Reverse(c.small_state.beam_score()));
+            indices.clear();
+            indices.extend(0..candidates.len());
+            glidesort::sort_by_key(&mut indices, |&i| {
+                Reverse(candidates[i].small_state.beam_score())
+            });
 
             deduplicator.clear();
             self.update_tree(
-                candidates
-                    .drain(..)
+                indices
+                    .iter()
+                    .map(|&i| candidates[i].clone())
                     .filter(|c| deduplicator.filter(&c.small_state))
                     .take(beam_width),
             );
