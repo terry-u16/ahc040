@@ -5,7 +5,7 @@ use crate::{
     solver::{
         estimator::Sampler,
         simd::{
-            horizontal_add_16, horizontal_or_16, horizontal_xor_16, round_u16, AlignedU16,
+            horizontal_and_16, horizontal_or_16, horizontal_xor_16, round_u16, AlignedU16,
             SimdRectSet, AVX2_U16_W,
         },
     },
@@ -430,12 +430,9 @@ impl ActGen {
             }
         };
 
-        // 右ビットシフトすることで0 or 1を作り、合計を求める
-        let is_touching = _mm256_srli_epi16(is_touching, 15);
-        let is_touching_cnt = horizontal_add_16(is_touching) as usize;
-
         // ピッタリくっついていないものがあったらNG
-        if is_touching_cnt < AVX2_U16_W {
+        let is_touching = horizontal_and_16(is_touching);
+        if is_touching == 0 {
             return None;
         }
 
