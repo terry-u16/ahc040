@@ -4,7 +4,10 @@ use crate::{
     problem::{Dir, Input, Op},
     solver::{
         estimator::Sampler,
-        simd::{horizontal_add, horizontal_or, round_u16, AlignedU16, SimdRectSet, AVX2_U16_W},
+        simd::{
+            horizontal_add_16, horizontal_or_16, horizontal_xor_16, round_u16, AlignedU16,
+            SimdRectSet, AVX2_U16_W,
+        },
     },
     util::BitSetIterU128,
 };
@@ -429,7 +432,7 @@ impl ActGen {
 
         // 右ビットシフトすることで0 or 1を作り、合計を求める
         let is_touching = _mm256_srli_epi16(is_touching, 15);
-        let is_touching_cnt = horizontal_add(is_touching) as usize;
+        let is_touching_cnt = horizontal_add_16(is_touching) as usize;
 
         // ピッタリくっついていないものがあったらNG
         if is_touching_cnt < AVX2_U16_W {
@@ -437,23 +440,23 @@ impl ActGen {
         }
 
         // ハッシュ計算
-        // 16bit * 16bit = 32bit を上位・下位16bitずつに分け、それぞれの和を取る
+        // 16bit * 16bit = 32bit を上位・下位16bitずつに分け、それぞれのxorを取る
         let hash_base_x = hash_base_x[turn].load();
         let hash_base_y = hash_base_y[turn].load();
 
-        let mul_hi = _mm256_mulhi_epu16(x0, hash_base_x);
-        let mul_lo = _mm256_mullo_epi16(x0, hash_base_x);
-        let x_hi_sum = horizontal_add(mul_hi) as u32;
-        let x_lo_sum = horizontal_add(mul_lo) as u32;
+        let x_mul_hi = _mm256_mulhi_epu16(x0, hash_base_x);
+        let x_mul_lo = _mm256_mullo_epi16(x0, hash_base_x);
+        let y_mul_hi = _mm256_mulhi_epu16(y0, hash_base_y);
+        let y_mul_lo = _mm256_mullo_epi16(y0, hash_base_y);
 
-        let mul_hi = _mm256_mulhi_epu16(y0, hash_base_y);
-        let mul_lo = _mm256_mullo_epi16(y0, hash_base_y);
-        let y_hi_sum = horizontal_add(mul_hi) as u32;
-        let y_lo_sum = horizontal_add(mul_lo) as u32;
+        let mul_hi = _mm256_xor_si256(x_mul_hi, y_mul_hi);
+        let mul_lo = _mm256_xor_si256(x_mul_lo, y_mul_lo);
+        let mul_hi_xor = horizontal_xor_16(mul_hi) as u32;
+        let mul_lo_xor = horizontal_xor_16(mul_lo) as u32;
 
         // 適当に並べる
         // xとyの対称性がないとflip時に壊れるので注意
-        let mut hash_xor = ((x_hi_sum ^ y_hi_sum) << 16) | (x_lo_sum ^ y_lo_sum);
+        let mut hash_xor = (mul_hi_xor << 16) | mul_lo_xor;
 
         if rotate {
             hash_xor ^= hash_base_rot[turn];
@@ -603,7 +606,7 @@ impl ActGen {
                 invalid = _mm256_or_si256(invalid, pred);
 
                 // invalidなものが1つでもあったらピッタリくっつけられないのでNG
-                let is_invalid = horizontal_or(invalid) > 0;
+                let is_invalid = horizontal_or_16(invalid) > 0;
                 invalid_flag |= (is_invalid as u128) << rect_i;
             }
 

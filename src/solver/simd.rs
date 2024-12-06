@@ -9,7 +9,7 @@ pub(super) const fn round_u16(x: u32) -> u16 {
     ((x + (1 << 5)) >> 6) as u16
 }
 
-pub fn horizontal_add(x: __m256i) -> i32 {
+pub fn horizontal_add_16(x: __m256i) -> i32 {
     unsafe {
         let low = _mm256_extracti128_si256(x, 0);
         let high = _mm256_extracti128_si256(x, 1);
@@ -22,7 +22,7 @@ pub fn horizontal_add(x: __m256i) -> i32 {
     }
 }
 
-pub fn horizontal_or(x: __m256i) -> u16 {
+pub fn horizontal_or_16(x: __m256i) -> u16 {
     unsafe {
         let low = _mm256_castsi256_si128(x);
         let high = _mm256_extracti128_si256(x, 1);
@@ -32,6 +32,19 @@ pub fn horizontal_or(x: __m256i) -> u16 {
         let x = _mm_or_si128(x, _mm_srli_si128::<4>(x));
         let x = _mm_or_si128(x, _mm_srli_si128::<8>(x));
         let x = _mm_extract_epi16(x, 0);
+        x as u16
+    }
+}
+
+pub fn horizontal_xor_16(x: __m256i) -> u16 {
+    unsafe {
+        let low = _mm256_castsi256_si128(x);
+        let high = _mm256_extracti128_si256(x, 1);
+        let x = _mm_xor_si128(low, high);
+        let x = _mm_xor_si128(x, _mm_srli_si128::<2>(x));
+        let x = _mm_xor_si128(x, _mm_srli_si128::<4>(x));
+        let x = _mm_xor_si128(x, _mm_srli_si128::<8>(x));
+        let x = _mm_extract_epi32(x, 0);
         x as u16
     }
 }
@@ -89,13 +102,32 @@ mod test {
     use super::*;
 
     #[test]
-    fn horizontal_add_test() {
+    fn horizontal_xor_16_test() {
         let mut rng = thread_rng();
 
         for _ in 0..100 {
             let data: [u16; 16] = core::array::from_fn(|_| rng.gen());
             let x = unsafe { _mm256_loadu_si256(data.as_ptr() as *const __m256i) };
-            let sum = horizontal_add(x) as u16;
+            let xor = horizontal_xor_16(x);
+
+            let mut expected = 0u16;
+
+            for &x in data.iter() {
+                expected ^= x;
+            }
+
+            assert_eq!(xor, expected);
+        }
+    }
+
+    #[test]
+    fn horizontal_add_16_test() {
+        let mut rng = thread_rng();
+
+        for _ in 0..100 {
+            let data: [u16; 16] = core::array::from_fn(|_| rng.gen());
+            let x = unsafe { _mm256_loadu_si256(data.as_ptr() as *const __m256i) };
+            let sum = horizontal_add_16(x) as u16;
 
             let mut expected = 0u16;
 
@@ -108,14 +140,14 @@ mod test {
     }
 
     #[test]
-    fn horizontal_or_test() {
+    fn horizontal_or_16_test() {
         let mut rng = thread_rng();
 
         for _ in 0..100 {
             let result = rng.gen::<i16>();
             let x: [i16; 16] = core::array::from_fn(|_| rng.gen::<i16>() & result);
             let x = unsafe { _mm256_loadu_si256(x.as_ptr() as *const __m256i) };
-            let or = horizontal_or(x);
+            let or = horizontal_or_16(x);
 
             assert_eq!(or, result as u16);
         }
