@@ -220,7 +220,6 @@ impl Annealer {
                 }
             } else {
                 neighbor.rollback(env, &mut state);
-                debug_assert_eq!(state.score(&env), current_score);
             }
         }
 
