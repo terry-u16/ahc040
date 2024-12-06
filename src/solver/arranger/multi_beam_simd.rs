@@ -8,7 +8,7 @@ use crate::{
     },
     util::BitSetIterU128,
 };
-use itertools::{izip, Itertools};
+use itertools::izip;
 use rand::Rng;
 use std::arch::x86_64::*;
 
