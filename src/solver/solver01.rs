@@ -59,19 +59,22 @@ impl Solver for Solver01 {
             monte_carlo_sampler.update(&observation);
         }
 
-        let each_duration = (2.8 - input.since().elapsed().as_secs_f64()) / arrange_count as f64;
-        let mut arranger = arranger::get_arranger(each_duration);
+        let mut arranger = arranger::get_arranger();
 
-        for _ in 0..arrange_count {
+        for i in 0..arrange_count {
+            let remaining_arrange_count = arrange_count - i;
+            let duration =
+                (2.9 - input.since().elapsed().as_secs_f64()) / remaining_arrange_count as f64;
+
             let ops = if use_monte_carlo {
-                arranger.arrange(&input, &mut monte_carlo_sampler, &mut rng)
+                arranger.arrange(&input, &mut monte_carlo_sampler, &mut rng, duration)
             } else {
-                arranger.arrange(&input, &mut gauss_sampler, &mut rng)
+                arranger.arrange(&input, &mut gauss_sampler, &mut rng, duration)
             };
 
             let measure = judge.query(&ops);
 
-            if use_monte_carlo {
+            if use_monte_carlo && i < arrange_count - 1 {
                 let observation = Observation2d::new(ops, measure.width(), measure.height());
                 monte_carlo_sampler.update(&observation);
             }
