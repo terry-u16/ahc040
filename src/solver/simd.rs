@@ -11,16 +11,24 @@ pub(super) const fn round_u16(x: u32) -> u16 {
 }
 
 #[target_feature(enable = "avx,avx2")]
-pub(super) unsafe fn horizontal_add_u16(x: __m256i) -> i32 {
+pub(super) unsafe fn horizontal_add_u16(x: __m256i) -> u32 {
     unsafe {
-        let low = _mm256_extracti128_si256(x, 0);
+        let low = _mm256_castsi256_si128(x);
         let high = _mm256_extracti128_si256(x, 1);
-        let x = _mm_add_epi16(low, high);
-        let x = _mm_hadd_epi16(x, x);
-        let x = _mm_hadd_epi16(x, x);
-        let x = _mm_hadd_epi16(x, x);
-        let x = _mm_extract_epi16(x, 0);
-        x
+
+        let low32 = _mm256_cvtepu16_epi32(low);
+        let high32 = _mm256_cvtepu16_epi32(high);
+        let x = _mm256_add_epi32(low32, high32);
+
+        let low = _mm256_castsi256_si128(x);
+        let high = _mm256_extracti128_si256(x, 1);
+        let x = _mm_add_epi32(low, high);
+
+        let x = _mm_hadd_epi32(x, x);
+        let x = _mm_hadd_epi32(x, x);
+        let x = _mm_extract_epi32(x, 0);
+
+        x as u32
     }
 }
 
@@ -329,12 +337,12 @@ mod test {
         for _ in 0..100 {
             let data: [u16; 16] = core::array::from_fn(|_| rng.gen());
             let x = unsafe { _mm256_loadu_si256(data.as_ptr() as *const __m256i) };
-            let sum = unsafe { horizontal_add_u16(x) as u16 };
+            let sum = unsafe { horizontal_add_u16(x) };
 
-            let mut expected = 0u16;
+            let mut expected = 0;
 
             for &x in data.iter() {
-                expected = expected.wrapping_add(x);
+                expected += x as u32;
             }
 
             assert_eq!(sum, expected);
