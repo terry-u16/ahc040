@@ -649,8 +649,10 @@ impl ActGen {
 
         let prev_turn = turn - 1;
         let placements_x1 = &large_state.placements_x1[..prev_turn];
-        let placements_y0 = &large_state.placements_y0[..prev_turn];
         let placements_y1 = &large_state.placements_y1[..prev_turn];
+        let new_x1 = large_state.placements_x1[prev_turn];
+        let new_y0 = large_state.placements_y0[prev_turn];
+        let new_y1 = large_state.placements_y1[prev_turn];
 
         // prev_turnに置いたrectは必ずvalidなので対象外とする
         let collision_flag = large_state.avaliable_collision_left & !(1 << prev_turn);
@@ -658,8 +660,10 @@ impl ActGen {
         unsafe {
             Self::get_invalid_collisions(
                 placements_x1,
-                placements_y0,
                 placements_y1,
+                new_x1,
+                new_y0,
+                new_y1,
                 collision_flag,
             )
         }
@@ -673,8 +677,10 @@ impl ActGen {
         // x, yを反転させて呼び出す
         let prev_turn = turn - 1;
         let placements_x1 = &large_state.placements_y1[..prev_turn];
-        let placements_y0 = &large_state.placements_x0[..prev_turn];
         let placements_y1 = &large_state.placements_x1[..prev_turn];
+        let new_x1 = large_state.placements_y1[prev_turn];
+        let new_y0 = large_state.placements_x0[prev_turn];
+        let new_y1 = large_state.placements_x1[prev_turn];
 
         // prev_turnに置いたrectは必ずvalidなので対象外とする
         let collision_flag = large_state.avaliable_collision_up & !(1 << prev_turn);
@@ -682,8 +688,10 @@ impl ActGen {
         unsafe {
             Self::get_invalid_collisions(
                 placements_x1,
-                placements_y0,
                 placements_y1,
+                new_x1,
+                new_y0,
+                new_y1,
                 collision_flag,
             )
         }
@@ -692,32 +700,25 @@ impl ActGen {
     #[target_feature(enable = "avx,avx2")]
     unsafe fn get_invalid_collisions(
         placements_x1: &[__m256i],
-        placements_y0: &[__m256i],
         placements_y1: &[__m256i],
+        new_x1: __m256i,
+        new_y0: __m256i,
+        new_y1: __m256i,
         collision_flag: u128,
     ) -> u128 {
         unsafe {
             let mut invalid_flag = 0;
 
             for rect_i in BitSetIterU128::new(collision_flag) {
-                let mut y_top = placements_y0[rect_i];
                 let xi1 = placements_x1[rect_i];
                 let yi1 = placements_y1[rect_i];
-                let rect_next = rect_i + 1;
 
-                for (&xj1, &yj0, &yj1) in izip!(
-                    &placements_x1[rect_next..],
-                    &placements_y0[rect_next..],
-                    &placements_y1[rect_next..]
-                ) {
-                    // 上側から被っている領域
-                    // top = max(top, y_j1 if x_i1 < x_j1 and y_j0 < y_i1 else 0)
-                    let x_gt = _mm256_cmpgt_epi16(xj1, xi1);
-                    let y_gt = _mm256_cmpgt_epi16(yi1, yj0);
-                    let pred = _mm256_and_si256(x_gt, y_gt);
-                    let y_top_j = _mm256_and_si256(yj1, pred);
-                    y_top = _mm256_max_epi16(y_top, y_top_j);
-                }
+                // 上側から被っている領域
+                // a_i = y_j1 if x_i1 < x_j1 and y_j0 < y_i1 else 0
+                let x_gt = _mm256_cmpgt_epi16(new_x1, xi1);
+                let y_gt = _mm256_cmpgt_epi16(yi1, new_y0);
+                let pred = _mm256_and_si256(x_gt, y_gt);
+                let y_top = _mm256_and_si256(pred, new_y1);
 
                 // 右側面に露出している長さが0以上であることを要求する
                 let valid = _mm256_cmpgt_epi16(yi1, y_top);
