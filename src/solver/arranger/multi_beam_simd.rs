@@ -4,7 +4,7 @@ use crate::{
     problem::{Dir, Input, Op},
     solver::{
         estimator::Sampler,
-        simd::{SimdRectSet, SIMD_WIDTH},
+        simd::{AlignedU16, SimdRectSet, AVX2_U16_W},
     },
 };
 use itertools::{izip, Itertools};
@@ -48,7 +48,7 @@ impl Arranger for MultiBeamArrangerSimd {
             standard_beam_width,
             1,
             10000,
-            0,
+            1,
         );
         let deduplicator = beam::HashSingleDeduplicator::new();
         let (ops, _) = beam.run(input.rect_cnt(), beam_width_suggester, deduplicator);
@@ -60,55 +60,51 @@ impl Arranger for MultiBeamArrangerSimd {
 #[derive(Debug, Clone)]
 struct LargeState {
     // 256bitのレジスタをunsigned 16bit integer x16で使う
-    rects_h: Vec<__m256i>,
-    rects_w: Vec<__m256i>,
-    widths: __m256i,
-    heights: __m256i,
-    placements_x0: Vec<__m256i>,
-    placements_x1: Vec<__m256i>,
-    placements_y0: Vec<__m256i>,
-    placements_y1: Vec<__m256i>,
+    rects_h: [AlignedU16; Input::MAX_RECT_CNT],
+    rects_w: [AlignedU16; Input::MAX_RECT_CNT],
+    widths: AlignedU16,
+    heights: AlignedU16,
+    placements_x0: [AlignedU16; Input::MAX_RECT_CNT],
+    placements_x1: [AlignedU16; Input::MAX_RECT_CNT],
+    placements_y0: [AlignedU16; Input::MAX_RECT_CNT],
+    placements_y1: [AlignedU16; Input::MAX_RECT_CNT],
     hash: u32,
-    hash_base_x: Vec<__m256i>,
-    hash_base_y: Vec<__m256i>,
-    hash_base_rot: Vec<u32>,
+    hash_base_x: [AlignedU16; Input::MAX_RECT_CNT],
+    hash_base_y: [AlignedU16; Input::MAX_RECT_CNT],
+    hash_base_rot: [u32; Input::MAX_RECT_CNT],
     turn: usize,
 }
 
 impl LargeState {
     #[target_feature(enable = "avx,avx2")]
     unsafe fn new(input: Input, rects: SimdRectSet, rng: &mut impl rand::Rng) -> Self {
-        let zero = unsafe { _mm256_setzero_si256() };
-        let rects_h = rects
-            .heights
-            .iter()
-            .map(|rect| unsafe { _mm256_loadu_si256(rect.as_ptr() as *const __m256i) })
-            .collect_vec();
-        let rects_w = rects
-            .widths
-            .iter()
-            .map(|rect| unsafe { _mm256_loadu_si256(rect.as_ptr() as *const __m256i) })
-            .collect_vec();
-        let hash_base_x = (0..input.rect_cnt())
-            .map(|_| {
-                let v: [u16; SIMD_WIDTH] = [0; SIMD_WIDTH].map(|_| rng.gen());
-                unsafe { _mm256_loadu_si256(v.as_ptr() as *const __m256i) }
-            })
-            .collect();
-        let hash_base_y = (0..input.rect_cnt())
-            .map(|_| {
-                let v: [u16; SIMD_WIDTH] = [0; SIMD_WIDTH].map(|_| rng.gen());
-                unsafe { _mm256_loadu_si256(v.as_ptr() as *const __m256i) }
-            })
-            .collect();
-        let hash_base_rot = (0..input.rect_cnt()).map(|_| rng.gen()).collect();
-        let placements = vec![zero; input.rect_cnt()];
+        let mut rects_h = [AlignedU16::ZERO; Input::MAX_RECT_CNT];
+        let mut rects_w = [AlignedU16::ZERO; Input::MAX_RECT_CNT];
+
+        for i in 0..input.rect_cnt() {
+            rects_h[i] = AlignedU16(rects.heights[i]);
+            rects_w[i] = AlignedU16(rects.widths[i]);
+        }
+
+        let hash_base_x = core::array::from_fn(|_| {
+            let mut v = [0; AVX2_U16_W];
+            rng.fill(&mut v);
+            AlignedU16(v)
+        });
+        let hash_base_y = core::array::from_fn(|_| {
+            let mut v = [0; AVX2_U16_W];
+            rng.fill(&mut v);
+            AlignedU16(v)
+        });
+        let mut hash_base_rot = [0; Input::MAX_RECT_CNT];
+        rng.fill(&mut hash_base_rot);
+        let placements = [AlignedU16::ZERO; Input::MAX_RECT_CNT];
 
         // 最初から幅を確保しておく
-        let mut areas = [0; SIMD_WIDTH];
+        let mut areas = [0; AVX2_U16_W];
 
         for (h, w) in izip!(&rects.heights, &rects.widths) {
-            for i in 0..SIMD_WIDTH {
+            for i in 0..AVX2_U16_W {
                 let w = w[i] as u64;
                 let h = h[i] as u64;
                 areas[i] += w * h;
@@ -116,14 +112,13 @@ impl LargeState {
         }
 
         // 10%余裕を持たせる
-        let default_width: [u16; 16] = areas.map(|a| (a as f64 * 1.1).sqrt() as u16);
-        let default_width = unsafe { _mm256_loadu_si256(default_width.as_ptr() as *const __m256i) };
+        let default_width = AlignedU16(areas.map(|a| (a as f64 * 1.1).sqrt() as u16));
 
         Self {
             rects_h,
             rects_w,
             widths: default_width,
-            heights: zero,
+            heights: AlignedU16::ZERO,
             placements_x0: placements.clone(),
             placements_x1: placements.clone(),
             placements_y0: placements.clone(),
@@ -139,14 +134,14 @@ impl LargeState {
 
 #[derive(Debug, Clone)]
 struct SmallState {
-    placements_x0: __m256i,
-    placements_x1: __m256i,
-    placements_y0: __m256i,
-    placements_y1: __m256i,
-    old_widths: __m256i,
-    old_heights: __m256i,
-    new_widths: __m256i,
-    new_heights: __m256i,
+    placements_x0: AlignedU16,
+    placements_x1: AlignedU16,
+    placements_y0: AlignedU16,
+    placements_y1: AlignedU16,
+    old_widths: AlignedU16,
+    old_heights: AlignedU16,
+    new_widths: AlignedU16,
+    new_heights: AlignedU16,
     hash: u32,
     hash_xor: u32,
     op: Op,
@@ -171,17 +166,15 @@ impl SmallState {
 
 impl Default for SmallState {
     fn default() -> Self {
-        let zero = unsafe { _mm256_setzero_si256() };
-
         Self {
-            placements_x0: zero,
-            placements_x1: zero,
-            placements_y0: zero,
-            placements_y1: zero,
-            old_widths: zero,
-            old_heights: zero,
-            new_widths: zero,
-            new_heights: zero,
+            placements_x0: AlignedU16::ZERO,
+            placements_x1: AlignedU16::ZERO,
+            placements_y0: AlignedU16::ZERO,
+            placements_y1: AlignedU16::ZERO,
+            old_widths: AlignedU16::ZERO,
+            old_heights: AlignedU16::ZERO,
+            new_widths: AlignedU16::ZERO,
+            new_heights: AlignedU16::ZERO,
             hash: Default::default(),
             hash_xor: Default::default(),
             op: Default::default(),
@@ -238,14 +231,14 @@ impl ActGen {
         rotate: bool,
     ) -> Option<SmallState> {
         let turn = large_state.turn;
-        let rect_h = large_state.rects_h[turn];
-        let rect_w = large_state.rects_w[turn];
+        let rect_h = large_state.rects_h[turn].into();
+        let rect_w = large_state.rects_w[turn].into();
         let placements_x0 = &large_state.placements_x0;
         let placements_x1 = &large_state.placements_x1;
         let placements_y0 = &large_state.placements_y0;
         let placements_y1 = &large_state.placements_y1;
-        let heights = large_state.heights;
-        let widths = large_state.widths;
+        let heights = large_state.heights.into();
+        let widths = large_state.widths.into();
         let hash = large_state.hash;
         let hash_base_x = &large_state.hash_base_x;
         let hash_base_y = &large_state.hash_base_y;
@@ -280,14 +273,14 @@ impl ActGen {
     ) -> Option<SmallState> {
         // 下からrectを置くので、水平・垂直を入れ替える
         let turn = large_state.turn;
-        let rect_h = large_state.rects_w[turn];
-        let rect_w = large_state.rects_h[turn];
+        let rect_h = large_state.rects_w[turn].into();
+        let rect_w = large_state.rects_h[turn].into();
         let placements_x0 = &large_state.placements_y0;
         let placements_x1 = &large_state.placements_y1;
         let placements_y0 = &large_state.placements_x0;
         let placements_y1 = &large_state.placements_x1;
-        let heights = large_state.widths;
-        let widths = large_state.heights;
+        let heights = large_state.widths.into();
+        let widths = large_state.heights.into();
         let hash = large_state.hash;
         let hash_base_x = &large_state.hash_base_y;
         let hash_base_y = &large_state.hash_base_x;
@@ -326,15 +319,15 @@ impl ActGen {
         rotate: bool,
         mut rect_h: __m256i,
         mut rect_w: __m256i,
-        placements_x0: &[__m256i],
-        placements_x1: &[__m256i],
-        placements_y0: &[__m256i],
-        placements_y1: &[__m256i],
+        placements_x0: &[AlignedU16],
+        placements_x1: &[AlignedU16],
+        placements_y0: &[AlignedU16],
+        placements_y1: &[AlignedU16],
         heights: __m256i,
         widths: __m256i,
         hash: u32,
-        hash_base_x: &[__m256i],
-        hash_base_y: &[__m256i],
+        hash_base_x: &[AlignedU16],
+        hash_base_y: &[AlignedU16],
         hash_base_rot: &[u32],
     ) -> Option<SmallState> {
         if rotate {
@@ -342,7 +335,7 @@ impl ActGen {
         }
 
         let y0 = match base {
-            Some(index) => placements_y1[index],
+            Some(index) => placements_y1[index].load(),
             None => _mm256_setzero_si256(),
         };
         let y1 = _mm256_add_epi16(y0, rect_h);
@@ -360,11 +353,11 @@ impl ActGen {
             // };
             //
             // x0 = x0.max(x);
-            let max_y0 = _mm256_max_epu16(y0, *p_y0);
-            let min_y1 = _mm256_min_epu16(y1, *p_y1);
+            let max_y0 = _mm256_max_epu16(y0, p_y0.load());
+            let min_y1 = _mm256_min_epu16(y1, p_y1.load());
 
             let gt = _mm256_cmpgt_epi16(min_y1, max_y0);
-            let x = _mm256_and_si256(*p_x1, gt);
+            let x = _mm256_and_si256(p_x1.load(), gt);
             x0 = _mm256_max_epu16(x0, x);
         }
 
@@ -374,8 +367,8 @@ impl ActGen {
         let is_touching = match base {
             Some(base) => {
                 // 側面が対象の長方形とmin(w0, w1) / 4以上隣接していることを要求する
-                let p_x0 = placements_x0[base];
-                let p_x1 = placements_x1[base];
+                let p_x0 = placements_x0[base].load();
+                let p_x1 = placements_x1[base].load();
 
                 // 隣接長さを求める
                 let max_x0 = _mm256_max_epu16(x0, p_x0);
@@ -402,19 +395,22 @@ impl ActGen {
         let is_touching_cnt = horizontal_add(is_touching) as usize;
 
         // ピッタリくっついていないものがあったらNG
-        if is_touching_cnt < SIMD_WIDTH {
+        if is_touching_cnt < AVX2_U16_W {
             return None;
         }
 
         // ハッシュ計算
         // 16bit * 16bit = 32bit を上位・下位16bitずつに分け、それぞれの和を取る
-        let mul_hi = _mm256_mulhi_epu16(x0, hash_base_x[turn]);
-        let mul_lo = _mm256_mullo_epi16(x0, hash_base_x[turn]);
+        let hash_base_x = hash_base_x[turn].load();
+        let hash_base_y = hash_base_y[turn].load();
+
+        let mul_hi = _mm256_mulhi_epu16(x0, hash_base_x);
+        let mul_lo = _mm256_mullo_epi16(x0, hash_base_x);
         let x_hi_sum = horizontal_add(mul_hi) as u32;
         let x_lo_sum = horizontal_add(mul_lo) as u32;
 
-        let mul_hi = _mm256_mulhi_epu16(y0, hash_base_y[turn]);
-        let mul_lo = _mm256_mullo_epi16(y0, hash_base_y[turn]);
+        let mul_hi = _mm256_mulhi_epu16(y0, hash_base_y);
+        let mul_lo = _mm256_mullo_epi16(y0, hash_base_y);
         let y_hi_sum = horizontal_add(mul_hi) as u32;
         let y_lo_sum = horizontal_add(mul_lo) as u32;
 
@@ -433,7 +429,7 @@ impl ActGen {
         // スコアの昇順にソートした上で、減衰させながら和を取る
         // （期待値を最大化するよりは上振れを狙いたいため）
         let score = _mm256_add_epi16(new_height, new_width);
-        let mut scores = [0u16; SIMD_WIDTH];
+        let mut scores = [0u16; AVX2_U16_W];
         _mm256_storeu_si256(scores.as_mut_ptr() as *mut __m256i, score);
         scores.sort_unstable();
 
@@ -452,14 +448,14 @@ impl ActGen {
         let op = Op::new(turn, rotate, Dir::Left, base);
 
         Some(SmallState {
-            placements_x0: x0,
-            placements_x1: x1,
-            placements_y0: y0,
-            placements_y1: y1,
-            old_widths: widths,
-            old_heights: heights,
-            new_widths: new_width,
-            new_heights: new_height,
+            placements_x0: x0.into(),
+            placements_x1: x1.into(),
+            placements_y0: y0.into(),
+            placements_y1: y1.into(),
+            old_widths: widths.into(),
+            old_heights: heights.into(),
+            new_widths: new_width.into(),
+            new_heights: new_height.into(),
             hash,
             hash_xor,
             op,

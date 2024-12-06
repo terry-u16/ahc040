@@ -4,7 +4,7 @@ use crate::{
         Dir::{Left, Up},
         Input, Op,
     },
-    solver::simd::{round_u16, SIMD_WIDTH},
+    solver::simd::{round_u16, AVX2_U16_W},
 };
 use itertools::{izip, Itertools};
 use ordered_float::OrderedFloat;
@@ -28,21 +28,21 @@ impl MonteCarloSampler {
         candidate_cnt: usize,
     ) -> Self {
         assert!(
-            candidate_cnt % SIMD_WIDTH == 0,
+            candidate_cnt % AVX2_U16_W == 0,
             "candidate_cnt must be a multiple of SIMD_WIDTH"
         );
 
         let mut candidates = vec![vec![RectU16::default(); input.rect_cnt()]; candidate_cnt];
 
-        for group_i in 0..candidate_cnt / SIMD_WIDTH {
+        for group_i in 0..candidate_cnt / AVX2_U16_W {
             let rects = sampler.sample(rng);
 
             for rect_i in 0..input.rect_cnt() {
-                for simd_i in 0..SIMD_WIDTH {
+                for simd_i in 0..AVX2_U16_W {
                     let height = rects.heights[rect_i][simd_i];
                     let width = rects.widths[rect_i][simd_i];
 
-                    let candidates_i = group_i * SIMD_WIDTH + simd_i;
+                    let candidates_i = group_i * AVX2_U16_W + simd_i;
                     candidates[candidates_i][rect_i] = RectU16::new(height, width);
                 }
             }
@@ -75,13 +75,13 @@ impl MonteCarloSampler {
         let observed_x = round_u16(observation.len_x);
         let observed_y = round_u16(observation.len_y);
 
-        for group_i in 0..self.candidate_cnt / SIMD_WIDTH {
+        for group_i in 0..self.candidate_cnt / AVX2_U16_W {
             for rect_i in 0..self.rect_cnt {
-                let mut heights = [0; SIMD_WIDTH];
-                let mut widths = [0; SIMD_WIDTH];
+                let mut heights = [0; AVX2_U16_W];
+                let mut widths = [0; AVX2_U16_W];
 
-                for simd_i in 0..SIMD_WIDTH {
-                    let cand_i = group_i * SIMD_WIDTH + simd_i;
+                for simd_i in 0..AVX2_U16_W {
+                    let cand_i = group_i * AVX2_U16_W + simd_i;
                     heights[simd_i] = self.candidates[cand_i][rect_i].height;
                     widths[simd_i] = self.candidates[cand_i][rect_i].width;
                 }
@@ -103,8 +103,8 @@ impl MonteCarloSampler {
                 &mut pos,
             );
 
-            for simd_i in 0..SIMD_WIDTH {
-                let i = group_i * SIMD_WIDTH + simd_i;
+            for simd_i in 0..AVX2_U16_W {
+                let i = group_i * AVX2_U16_W + simd_i;
                 let rect = packed_rects[simd_i];
                 let expected_len = [rect.height as f64, rect.width as f64];
                 let observed_len = [observed_y as f64, observed_x as f64];
@@ -127,7 +127,7 @@ impl MonteCarloSampler {
         placements_y0: &mut Vec<__m256i>,
         placements_y1: &mut Vec<__m256i>,
         pos: &mut Vec<usize>,
-    ) -> [RectU16; SIMD_WIDTH] {
+    ) -> [RectU16; AVX2_U16_W] {
         placements_x0.clear();
         placements_x1.clear();
         placements_y0.clear();
@@ -178,14 +178,14 @@ impl MonteCarloSampler {
             }
         }
 
-        let mut rects = [RectU16::default(); SIMD_WIDTH];
-        let mut heights_u16 = [0; SIMD_WIDTH];
-        let mut widths_u16 = [0; SIMD_WIDTH];
+        let mut rects = [RectU16::default(); AVX2_U16_W];
+        let mut heights_u16 = [0; AVX2_U16_W];
+        let mut widths_u16 = [0; AVX2_U16_W];
 
         _mm256_storeu_si256(heights_u16.as_mut_ptr() as *mut __m256i, heights);
         _mm256_storeu_si256(widths_u16.as_mut_ptr() as *mut __m256i, widths);
 
-        for simd_i in 0..SIMD_WIDTH {
+        for simd_i in 0..AVX2_U16_W {
             rects[simd_i] = RectU16::new(heights_u16[simd_i], widths_u16[simd_i]);
         }
 
@@ -259,13 +259,13 @@ impl Sampler for MonteCarloSampler {
         let mut indices = (0..self.candidate_cnt).collect_vec();
         indices.sort_unstable_by_key(|&i| Reverse(OrderedFloat(self.log_likelihoods[i])));
 
-        let indices = &mut indices[..SIMD_WIDTH];
+        let indices = &mut indices[..AVX2_U16_W];
         indices.sort_unstable();
 
-        let mut heights = vec![[0; SIMD_WIDTH]; self.rect_cnt];
-        let mut widths = vec![[0; SIMD_WIDTH]; self.rect_cnt];
+        let mut heights = vec![[0; AVX2_U16_W]; self.rect_cnt];
+        let mut widths = vec![[0; AVX2_U16_W]; self.rect_cnt];
 
-        for simd_i in 0..SIMD_WIDTH {
+        for simd_i in 0..AVX2_U16_W {
             for rect_i in 0..self.rect_cnt {
                 heights[rect_i][simd_i] = self.candidates[indices[simd_i]][rect_i].height;
                 widths[rect_i][simd_i] = self.candidates[indices[simd_i]][rect_i].width;
@@ -273,7 +273,7 @@ impl Sampler for MonteCarloSampler {
         }
 
         // 2回同じサンプルを使うのは無駄なので削除する
-        self.candidate_cnt -= SIMD_WIDTH;
+        self.candidate_cnt -= AVX2_U16_W;
 
         for &i in indices.iter().rev() {
             self.candidates.remove(i);

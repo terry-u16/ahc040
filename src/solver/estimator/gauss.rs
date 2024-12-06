@@ -3,7 +3,7 @@ mod annealing;
 use super::Sampler;
 use crate::{
     problem::{Input, Op, Rect},
-    solver::simd::{round_u16, SimdRectSet, SIMD_WIDTH},
+    solver::simd::{round_u16, SimdRectSet, AVX2_U16_W},
 };
 use itertools::Itertools as _;
 use nalgebra::{Cholesky, DMatrix, DVector, Matrix1};
@@ -168,10 +168,10 @@ impl<'a> GaussSampler<'a> {
 
 impl Sampler for GaussSampler<'_> {
     fn sample(&mut self, rng: &mut impl Rng) -> SimdRectSet {
-        let mut heights = vec![[0; SIMD_WIDTH]; self.estimator.rect_cnt];
-        let mut widths = vec![[0; SIMD_WIDTH]; self.estimator.rect_cnt];
+        let mut heights = vec![[0; AVX2_U16_W]; self.estimator.rect_cnt];
+        let mut widths = vec![[0; AVX2_U16_W]; self.estimator.rect_cnt];
 
-        for simd_i in 0..SIMD_WIDTH {
+        for simd_i in 0..AVX2_U16_W {
             let dist = StandardNormal;
             let values: Vec<f64> = (0..self.estimator.mean.len())
                 .map(|_| dist.sample(rng))

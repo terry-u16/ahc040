@@ -14,6 +14,8 @@ pub struct Input {
 }
 
 impl Input {
+    pub const MAX_RECT_CNT: usize = 100;
+
     pub fn read() -> Self {
         input_interactive! {
             rect_cnt: usize,
