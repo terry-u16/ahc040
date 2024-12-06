@@ -179,22 +179,91 @@ struct SmallState {
 }
 
 impl SmallState {
-    fn flip(mut self) -> Self {
-        std::mem::swap(&mut self.placements_x0, &mut self.placements_y0);
-        std::mem::swap(&mut self.placements_x1, &mut self.placements_y1);
-        std::mem::swap(&mut self.old_widths, &mut self.old_heights);
-        std::mem::swap(&mut self.new_widths, &mut self.new_heights);
-        std::mem::swap(
-            &mut self.avaliable_base_left_xor,
-            &mut self.avaliable_base_up_xor,
-        );
-        let dir = match self.op.dir() {
-            Dir::Left => Dir::Up,
-            Dir::Up => Dir::Left,
-        };
+    fn new(
+        mut placements_x0: AlignedU16,
+        mut placements_x1: AlignedU16,
+        mut placements_y0: AlignedU16,
+        mut placements_y1: AlignedU16,
+        mut old_widths: AlignedU16,
+        mut old_heights: AlignedU16,
+        mut new_widths: AlignedU16,
+        mut new_heights: AlignedU16,
+        hash: u32,
+        hash_xor: u32,
+        mut op: Op,
+        mut avaliable_base_left_xor: u128,
+        mut avaliable_base_up_xor: u128,
+        flip: bool,
+    ) -> Self {
+        if flip {
+            std::mem::swap(&mut placements_x0, &mut placements_y0);
+            std::mem::swap(&mut placements_x1, &mut placements_y1);
+            std::mem::swap(&mut old_widths, &mut old_heights);
+            std::mem::swap(&mut new_widths, &mut new_heights);
+            std::mem::swap(&mut avaliable_base_left_xor, &mut avaliable_base_up_xor);
+            let dir = match op.dir() {
+                Dir::Left => Dir::Up,
+                Dir::Up => Dir::Left,
+            };
 
-        self.op = Op::new(self.op.rect_idx(), self.op.rotate(), dir, self.op.base());
-        self
+            op = Op::new(op.rect_idx(), op.rotate(), dir, op.base());
+        }
+
+        let score = unsafe { Self::calc_score(new_heights) };
+
+        Self {
+            placements_x0,
+            placements_x1,
+            placements_y0,
+            placements_y1,
+            old_widths,
+            old_heights,
+            new_widths,
+            new_heights,
+            hash,
+            hash_xor,
+            op,
+            score,
+            avaliable_base_left_xor,
+            avaliable_base_up_xor,
+        }
+    }
+
+    #[target_feature(enable = "avx,avx2")]
+    unsafe fn calc_score(height: AlignedU16) -> f32 {
+        // スコアの昇順にソートした上で、減衰させながら和を取る
+        // （期待値を最大化するよりは上振れを狙いたいため）
+        thread_local!(static SCORE_MUL: [AlignedF32; 2] = {
+            // TODO: パラメータ調整
+            const SCORE_MUL: f32 = 0.9;
+            [
+                AlignedF32(std::array::from_fn(|i| SCORE_MUL.powi(i as i32))),
+                AlignedF32(std::array::from_fn(|i| {
+                    SCORE_MUL.powi((i + AVX2_F32_W) as i32)
+                })),
+            ]
+        });
+
+        SCORE_MUL.with(|score_mul| {
+            let score = bitonic_sort_u16(height.load());
+
+            // u16 x 16 -> (u32 x 8) x 2 -> (f32 x 8) x 2
+            let score_low = _mm256_castsi256_si128(score);
+            let score_high = _mm256_extracti128_si256(score, 1);
+            let score_u32_low = _mm256_cvtepu16_epi32(score_low);
+            let score_u32_high = _mm256_cvtepu16_epi32(score_high);
+            let score_f32_low = _mm256_cvtepi32_ps(score_u32_low);
+            let score_f32_high = _mm256_cvtepi32_ps(score_u32_high);
+
+            // 用意していた係数とかける
+            let score_mul_low = score_mul[0].load();
+            let score_mul_high = score_mul[1].load();
+            let score_low = _mm256_mul_ps(score_f32_low, score_mul_low);
+            let score_high = _mm256_mul_ps(score_f32_high, score_mul_high);
+            let score = _mm256_add_ps(score_low, score_high);
+            let score = horizontal_add_f32(score);
+            -score
+        })
     }
 }
 
@@ -226,7 +295,14 @@ impl beam::SmallState for SmallState {
     type Action = Op;
 
     fn raw_score(&self) -> Self::Score {
-        OrderedFloat(-self.score)
+        // 最終ターンは縦と横からスコアを再計算
+        let score_h =
+            unsafe { Self::calc_score(self.new_heights) + Self::calc_score(self.new_widths) };
+        OrderedFloat(score_h)
+    }
+
+    fn beam_score(&self) -> Self::Score {
+        OrderedFloat(self.score)
     }
 
     fn hash(&self) -> Self::Hash {
@@ -261,23 +337,11 @@ impl beam::SmallState for SmallState {
     }
 }
 
-struct ActGen {
-    score_mul_low: AlignedF32,
-    score_mul_high: AlignedF32,
-}
+struct ActGen;
 
 impl ActGen {
     fn new() -> Self {
-        // TODO: パラメータ調整
-        const SCORE_MUL: f32 = 0.9;
-        let score_mul_low: [f32; AVX2_F32_W] = std::array::from_fn(|i| SCORE_MUL.powi(i as i32));
-        let score_mul_high: [f32; AVX2_F32_W] =
-            std::array::from_fn(|i| SCORE_MUL.powi((i + AVX2_F32_W) as i32));
-
-        Self {
-            score_mul_low: AlignedF32(score_mul_low),
-            score_mul_high: AlignedF32(score_mul_high),
-        }
+        Self
     }
 
     fn gen_left_cand(
@@ -325,6 +389,7 @@ impl ActGen {
                 available_base_up_xor,
                 width_limit,
                 height_limit,
+                false,
             )
         }
     }
@@ -356,7 +421,7 @@ impl ActGen {
         let width_limit = large_state.height_limit;
         let height_limit = large_state.width_limit;
 
-        let state = unsafe {
+        unsafe {
             self.gen_cand(
                 turn,
                 base,
@@ -377,10 +442,9 @@ impl ActGen {
                 available_base_up_xor,
                 width_limit,
                 height_limit,
+                true,
             )
-        };
-
-        state.map(|s| s.flip())
+        }
     }
 
     /// 右からrectを置く候補を生成する
@@ -407,6 +471,7 @@ impl ActGen {
         available_base_up_xor: u128,
         width_limit: AlignedU16,
         height_limit: AlignedU16,
+        flip: bool,
     ) -> Option<SmallState> {
         if rotate {
             std::mem::swap(&mut rect_w, &mut rect_h);
@@ -513,48 +578,28 @@ impl ActGen {
         let new_width = _mm256_max_epu16(x1, widths);
         let new_height = _mm256_max_epu16(y1, heights);
 
-        // スコアを計算
-        // スコアの昇順にソートした上で、減衰させながら和を取る
-        // （期待値を最大化するよりは上振れを狙いたいため）
-        let score = _mm256_add_epi16(new_height, new_width);
-        let score = bitonic_sort_u16(score);
-
-        // u16 x 16 -> (u32 x 8) x 2 -> (f32 x 8) x 2
-        let score_low = _mm256_castsi256_si128(score);
-        let score_high = _mm256_extracti128_si256(score, 1);
-        let score_u32_low = _mm256_cvtepu16_epi32(score_low);
-        let score_u32_high = _mm256_cvtepu16_epi32(score_high);
-        let score_f32_low = _mm256_cvtepi32_ps(score_u32_low);
-        let score_f32_high = _mm256_cvtepi32_ps(score_u32_high);
-
-        // 用意していた係数とかける
-        let score_low = _mm256_mul_ps(score_f32_low, self.score_mul_low.load());
-        let score_high = _mm256_mul_ps(score_f32_high, self.score_mul_high.load());
-        let score = _mm256_add_ps(score_low, score_high);
-        let score = horizontal_add_f32(score);
-
         let hash = hash ^ hash_xor;
         let op = Op::new(turn, rotate, Dir::Left, base);
 
         let avaliable_base_left_xor = available_base_left_xor | (1 << turn);
         let avaliable_base_up_xor = available_base_up_xor | (1 << turn);
 
-        Some(SmallState {
-            placements_x0: x0.into(),
-            placements_x1: x1.into(),
-            placements_y0: y0.into(),
-            placements_y1: y1.into(),
-            old_widths: widths.into(),
-            old_heights: heights.into(),
-            new_widths: new_width.into(),
-            new_heights: new_height.into(),
+        Some(SmallState::new(
+            x0.into(),
+            x1.into(),
+            y0.into(),
+            y1.into(),
+            widths.into(),
+            heights.into(),
+            new_width.into(),
+            new_height.into(),
             hash,
             hash_xor,
             op,
-            score,
             avaliable_base_left_xor,
             avaliable_base_up_xor,
-        })
+            flip,
+        ))
     }
 
     fn get_left_invalid_bases(large_state: &LargeState, turn: usize) -> u128 {

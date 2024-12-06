@@ -614,7 +614,7 @@ impl<S: SmallState + Default + Clone, G: ActGen<S>> BeamSearch<S, G> {
             ..
         } = candidates
             .into_iter()
-            .max_by_key(|c| c.small_state.beam_score())
+            .max_by_key(|c| c.small_state.raw_score())
             .expect("最終状態となる候補が見つかりませんでした。");
 
         // 操作列の復元
