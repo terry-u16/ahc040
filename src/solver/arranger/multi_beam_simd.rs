@@ -40,7 +40,7 @@ impl Arranger for MultiBeamArrangerSimd {
         let act_gen = ActGen;
 
         let remaining_time = self.duration_sec - since.elapsed().as_secs_f64();
-        let mut beam = beam::BeamSearch::new(large_state, small_state, act_gen);
+        let mut beam = beam::BeamSearch::new(act_gen);
         let standard_beam_width = 2_000_000 / (input.rect_cnt() as usize).pow(2);
         let beam_width_suggester = BayesianBeamWidthSuggester::new(
             input.rect_cnt(),
@@ -52,7 +52,13 @@ impl Arranger for MultiBeamArrangerSimd {
             1,
         );
         let deduplicator = beam::HashSingleDeduplicator::new();
-        let (ops, _) = beam.run(input.rect_cnt(), beam_width_suggester, deduplicator);
+        let (ops, _) = beam.run(
+            large_state,
+            small_state,
+            input.rect_cnt(),
+            beam_width_suggester,
+            deduplicator,
+        );
 
         ops
     }

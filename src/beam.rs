@@ -516,7 +516,6 @@ const MAX_NODES: usize = std::u16::MAX as usize - 1;
 
 #[derive(Debug)]
 pub struct BeamSearch<S: SmallState, G: ActGen<S>> {
-    state: S::LargeState,
     act_gen: G,
     nodes: NodeVec<S>,
     current_index: NodeIndex,
@@ -527,9 +526,28 @@ pub struct BeamSearch<S: SmallState, G: ActGen<S>> {
 
 impl<S: SmallState + Default + Clone, G: ActGen<S>> BeamSearch<S, G> {
     /// ビーム木を指定された容量で初期化する
-    pub fn new(large_state: S::LargeState, small_state: S, act_gen: G) -> Self {
-        let mut nodes = NodeVec::new(MAX_NODES);
-        nodes.push(Node::new(
+    pub fn new(act_gen: G) -> Self {
+        let nodes = NodeVec::new(MAX_NODES);
+
+        Self {
+            act_gen,
+            nodes,
+            current_index: NodeIndex(0),
+            leaves: vec![],
+            next_leaves: vec![],
+            action_buffer: vec![],
+        }
+    }
+
+    fn init(&mut self, small_state: S) {
+        // 参照局所性が高くなるようにお祈りしながらソートする
+        self.leaves.sort_unstable();
+
+        while let Some(index) = self.leaves.pop() {
+            self.nodes.delete(index);
+        }
+
+        self.nodes.push(Node::new(
             small_state,
             NodeIndex::NULL,
             NodeIndex::NULL,
@@ -537,29 +555,29 @@ impl<S: SmallState + Default + Clone, G: ActGen<S>> BeamSearch<S, G> {
             NodeIndex::NULL,
         ));
 
-        Self {
-            state: large_state,
-            act_gen,
-            nodes,
-            current_index: NodeIndex(0),
-            leaves: vec![NodeIndex(0)],
-            next_leaves: vec![],
-            action_buffer: vec![],
-        }
+        self.current_index = NodeIndex(0);
+        self.leaves.push(NodeIndex(0));
+        self.next_leaves.clear();
+        self.action_buffer.clear();
     }
 
     pub fn run<W: BeamWidthSuggester, P: Deduplicator<S>>(
         &mut self,
+        mut large_state: S::LargeState,
+        small_state: S,
         max_turn: usize,
         mut beam_width_suggester: W,
         mut deduplicator: P,
     ) -> (Vec<S::Action>, S::Score) {
+        // 初期化
+        self.init(small_state);
+
         let mut candidates = vec![];
 
         for turn in 0..max_turn {
             let beam_width = beam_width_suggester.suggest();
             candidates.clear();
-            self.dfs(&mut candidates, true);
+            self.dfs(&mut candidates, true, &mut large_state);
 
             if turn + 1 == max_turn {
                 break;
@@ -658,12 +676,17 @@ impl<S: SmallState + Default + Clone, G: ActGen<S>> BeamSearch<S, G> {
 
     /// DFSでビームサーチ木を走査し、次の状態の一覧をcandidatesに詰める
     /// ビームサーチ木が一本道の場合は戻る必要がないため、is_single_pathで管理
-    fn dfs(&mut self, candidates: &mut Vec<Cancidate<S>>, is_single_path: bool) {
+    fn dfs(
+        &mut self,
+        candidates: &mut Vec<Cancidate<S>>,
+        is_single_path: bool,
+        state: &mut S::LargeState,
+    ) {
         // 葉ノードであれば次の遷移を行う
         if self.nodes[self.current_index].child == NodeIndex::NULL {
             self.act_gen.generate(
                 &self.nodes[self.current_index].small_state,
-                &self.state,
+                &state,
                 &mut self.action_buffer,
             );
 
@@ -685,13 +708,11 @@ impl<S: SmallState + Default + Clone, G: ActGen<S>> BeamSearch<S, G> {
         // 兄弟ノードを全て走査する
         loop {
             self.current_index = child_index;
-            self.nodes[child_index].small_state.apply(&mut self.state);
-            self.dfs(candidates, next_is_single_path);
+            self.nodes[child_index].small_state.apply(state);
+            self.dfs(candidates, next_is_single_path, state);
 
             if !next_is_single_path {
-                self.nodes[child_index]
-                    .small_state
-                    .rollback(&mut self.state);
+                self.nodes[child_index].small_state.rollback(state);
 
                 // デバッグ用
                 //assert!(prev_state == self.state);
@@ -895,13 +916,14 @@ mod test {
         let small_state = SmallState::default();
         let large_state = LargeState::new(input.n);
         let action_generator = ActionGenerator::new(&input);
-        let mut beam = BeamSearch::new(large_state, small_state, action_generator);
+        let mut beam = BeamSearch::new(action_generator);
 
         // hashを適当に全て0としているため、重複除去は行わない
         let deduplicator = NoOpDeduplicator;
         let beam_width = FixedBeamWidthSuggester::new(10);
 
-        let (actions, score) = beam.run(input.n, beam_width, deduplicator);
+        let (actions, score) =
+            beam.run(large_state, small_state, input.n, beam_width, deduplicator);
 
         eprintln!("score: {}", score);
         eprintln!("actions: {:?}", actions);
