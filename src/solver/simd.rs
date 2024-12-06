@@ -10,7 +10,8 @@ pub(super) const fn round_u16(x: u32) -> u16 {
     ((x + (1 << 5)) >> 6) as u16
 }
 
-pub fn horizontal_add_u16(x: __m256i) -> i32 {
+#[target_feature(enable = "avx,avx2")]
+pub(super) unsafe fn horizontal_add_u16(x: __m256i) -> i32 {
     unsafe {
         let low = _mm256_extracti128_si256(x, 0);
         let high = _mm256_extracti128_si256(x, 1);
@@ -23,7 +24,8 @@ pub fn horizontal_add_u16(x: __m256i) -> i32 {
     }
 }
 
-pub fn horizontal_and_u16(x: __m256i) -> u16 {
+#[target_feature(enable = "avx,avx2")]
+pub(super) unsafe fn horizontal_and_u16(x: __m256i) -> u16 {
     unsafe {
         let low = _mm256_castsi256_si128(x);
         let high = _mm256_extracti128_si256(x, 1);
@@ -37,7 +39,8 @@ pub fn horizontal_and_u16(x: __m256i) -> u16 {
     }
 }
 
-pub fn horizontal_or_u16(x: __m256i) -> u16 {
+#[target_feature(enable = "avx,avx2")]
+pub(super) unsafe fn horizontal_or_u16(x: __m256i) -> u16 {
     unsafe {
         let low = _mm256_castsi256_si128(x);
         let high = _mm256_extracti128_si256(x, 1);
@@ -51,7 +54,8 @@ pub fn horizontal_or_u16(x: __m256i) -> u16 {
     }
 }
 
-pub fn horizontal_xor_u16(x: __m256i) -> u16 {
+#[target_feature(enable = "avx,avx2")]
+pub(super) unsafe fn horizontal_xor_u16(x: __m256i) -> u16 {
     unsafe {
         let low = _mm256_castsi256_si128(x);
         let high = _mm256_extracti128_si256(x, 1);
@@ -64,7 +68,8 @@ pub fn horizontal_xor_u16(x: __m256i) -> u16 {
     }
 }
 
-pub fn horizontal_add_f32(x: __m256) -> f32 {
+#[target_feature(enable = "avx,avx2")]
+pub(super) unsafe fn horizontal_add_f32(x: __m256) -> f32 {
     unsafe {
         let low = _mm256_castps256_ps128(x);
         let high = _mm256_extractf128_ps(x, 1);
@@ -79,21 +84,44 @@ pub fn horizontal_add_f32(x: __m256) -> f32 {
     }
 }
 
-pub fn bitonic_sort_u16(x: __m256i) -> __m256i {
+#[target_feature(enable = "avx,avx2")]
+pub(super) unsafe fn bitonic_sort_u16(x: __m256i) -> __m256i {
     unsafe {
         // 上位128bitが全て1、下位128bitが全て0のマスク
-        let zero = _mm_setzero_si128();
+        let _mm_setzero_si128 = _mm_setzero_si128();
+        let zero = _mm_setzero_si128;
         let one = _mm_cmpeq_epi16(zero, zero);
         let zero_one_mask = _mm256_set_m128i(one, zero);
 
         // block 1
         // block 1-1
+        let x = block1(x);
+
+        // block 2
+        let x = block2(x);
+
+        // block 3
+        let x = block3(x, zero_one_mask);
+
+        // block 4
+        block4(x)
+    }
+}
+
+#[target_feature(enable = "avx,avx2")]
+unsafe fn block1(x: __m256i) -> __m256i {
+    unsafe {
         let shuffled = shuffle256_1_u16(x);
         let min = _mm256_min_epu16(x, shuffled);
         let max = _mm256_max_epu16(x, shuffled);
         let x = _mm256_blend_epi16::<0b01100110>(min, max);
+        x
+    }
+}
 
-        // block 2
+#[target_feature(enable = "avx,avx2")]
+unsafe fn block2(x: __m256i) -> __m256i {
+    unsafe {
         // block 2-1
         let shuffled = shuffle256_2_u16(x);
         let (min, max) = min_max_u16(x, shuffled);
@@ -103,8 +131,13 @@ pub fn bitonic_sort_u16(x: __m256i) -> __m256i {
         let shuffled = shuffle256_1_u16(x);
         let (min, max) = min_max_u16(x, shuffled);
         let x = _mm256_blend_epi16::<0b01011010>(min, max);
+        x
+    }
+}
 
-        // block 3
+#[target_feature(enable = "avx,avx2")]
+unsafe fn block3(x: __m256i, zero_one_mask: __m256i) -> __m256i {
+    unsafe {
         // block 3-1
         // 上位だけxorをすることで、大小関係を逆転させる
         let x = _mm256_xor_si256(x, zero_one_mask);
@@ -124,8 +157,13 @@ pub fn bitonic_sort_u16(x: __m256i) -> __m256i {
 
         // 反転させたので元に戻す
         let x = _mm256_xor_si256(x, zero_one_mask);
+        x
+    }
+}
 
-        // block 4
+#[target_feature(enable = "avx,avx2")]
+unsafe fn block4(x: __m256i) -> __m256i {
+    unsafe {
         // block 4-1
         // 比較演算 + ビットマスクが速そうだが、
         // 符号なし16bit整数の比較命令がないので2つのxmmレジスタに分割して処理
@@ -153,7 +191,8 @@ pub fn bitonic_sort_u16(x: __m256i) -> __m256i {
     }
 }
 
-fn min_max_u16(x: __m256i, y: __m256i) -> (__m256i, __m256i) {
+#[target_feature(enable = "avx,avx2")]
+unsafe fn min_max_u16(x: __m256i, y: __m256i) -> (__m256i, __m256i) {
     unsafe {
         let min = _mm256_min_epu16(x, y);
         let max = _mm256_max_epu16(x, y);
@@ -161,7 +200,8 @@ fn min_max_u16(x: __m256i, y: __m256i) -> (__m256i, __m256i) {
     }
 }
 
-fn shuffle256_1_u16(x: __m256i) -> __m256i {
+#[target_feature(enable = "avx,avx2")]
+unsafe fn shuffle256_1_u16(x: __m256i) -> __m256i {
     unsafe {
         // 16bitについてはhi/lo分けないとシャッフルできない
         let shuffled = _mm256_shufflehi_epi16::<0b10110001>(x);
@@ -170,14 +210,16 @@ fn shuffle256_1_u16(x: __m256i) -> __m256i {
     }
 }
 
-fn shuffle256_2_u16(x: __m256i) -> __m256i {
+#[target_feature(enable = "avx,avx2")]
+unsafe fn shuffle256_2_u16(x: __m256i) -> __m256i {
     unsafe {
         // 16bit整数を2つまとめて32bitと見なせば良い
         _mm256_shuffle_epi32::<0b10110001>(x)
     }
 }
 
-fn shuffle256_4_u16(x: __m256i) -> __m256i {
+#[target_feature(enable = "avx,avx2")]
+unsafe fn shuffle256_4_u16(x: __m256i) -> __m256i {
     unsafe {
         // 16bit整数を2つまとめて32bitと見なし、2つ飛びで交換すれば良い
         _mm256_shuffle_epi32::<0b01001110>(x)
@@ -268,7 +310,7 @@ mod test {
         for _ in 0..100 {
             let data: [u16; 16] = core::array::from_fn(|_| rng.gen());
             let x = unsafe { _mm256_loadu_si256(data.as_ptr() as *const __m256i) };
-            let xor = horizontal_xor_u16(x);
+            let xor = unsafe { horizontal_xor_u16(x) };
 
             let mut expected = 0u16;
 
@@ -287,7 +329,7 @@ mod test {
         for _ in 0..100 {
             let data: [u16; 16] = core::array::from_fn(|_| rng.gen());
             let x = unsafe { _mm256_loadu_si256(data.as_ptr() as *const __m256i) };
-            let sum = horizontal_add_u16(x) as u16;
+            let sum = unsafe { horizontal_add_u16(x) as u16 };
 
             let mut expected = 0u16;
 
@@ -307,7 +349,7 @@ mod test {
             let mask: u16 = rng.gen();
             let data: [u16; 16] = core::array::from_fn(|_| rng.gen::<u16>() | mask);
             let x = unsafe { _mm256_loadu_si256(data.as_ptr() as *const __m256i) };
-            let and = horizontal_and_u16(x);
+            let and = unsafe { horizontal_and_u16(x) };
 
             let mut expected = 0xffff;
 
@@ -327,7 +369,7 @@ mod test {
             let mask = rng.gen::<u16>();
             let data: [u16; 16] = core::array::from_fn(|_| rng.gen::<u16>() & mask);
             let x = unsafe { _mm256_loadu_si256(data.as_ptr() as *const __m256i) };
-            let or = horizontal_or_u16(x);
+            let or = unsafe { horizontal_or_u16(x) };
 
             let mut expected = 0x0000;
 
@@ -346,7 +388,7 @@ mod test {
         for _ in 0..100 {
             let data: [f32; 8] = core::array::from_fn(|_| rng.gen_range(0.0..1.0f32));
             let x = unsafe { _mm256_loadu_ps(data.as_ptr() as *const f32) };
-            let sum = horizontal_add_f32(x);
+            let sum = unsafe { horizontal_add_f32(x) };
 
             let mut expected = 0.0;
 
@@ -369,7 +411,7 @@ mod test {
         for _ in 0..100 {
             let data: [u16; 16] = core::array::from_fn(|_| rng.gen());
             let x = unsafe { _mm256_loadu_si256(data.as_ptr() as *const __m256i) };
-            let sorted = bitonic_sort_u16(x);
+            let sorted = unsafe { bitonic_sort_u16(x) };
 
             let mut expected: [u16; 16] = [0; 16];
             expected.copy_from_slice(&data);

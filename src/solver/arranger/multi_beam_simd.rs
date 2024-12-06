@@ -253,8 +253,6 @@ impl ActGen {
         let score_mul_low: [f32; AVX2_F32_W] = std::array::from_fn(|i| SCORE_MUL.powi(i as i32));
         let score_mul_high: [f32; AVX2_F32_W] =
             std::array::from_fn(|i| SCORE_MUL.powi((i + AVX2_F32_W) as i32));
-        eprintln!("score_mul_low: {:?}", score_mul_low);
-        eprintln!("score_mul_high: {:?}", score_mul_high);
 
         Self {
             score_mul_low: AlignedF32(score_mul_low),
