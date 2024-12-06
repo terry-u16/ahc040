@@ -81,6 +81,31 @@ pub fn binary_search<T: PrimInt>(ok: T, ng: T, f: impl Fn(T) -> bool) -> T {
     ok
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BitSetIterU128 {
+    flag: u128,
+}
+
+impl BitSetIterU128 {
+    pub fn new(flag: u128) -> Self {
+        Self { flag }
+    }
+}
+
+impl Iterator for BitSetIterU128 {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.flag != 0 {
+            let lsb = self.flag.trailing_zeros() as usize;
+            self.flag ^= self.flag & -(self.flag as i128) as u128;
+            return Some(lsb);
+        }
+
+        None
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -89,5 +114,18 @@ mod test {
     fn binary_search_test() {
         assert_eq!(binary_search(0, 10, |x| x * x <= 5), 2);
         assert_eq!(binary_search(10, 0, |x| x * x >= 5), 3);
+    }
+
+    #[test]
+    fn bitset_iter_u128_test() {
+        let mut iter = BitSetIterU128 {
+            flag: 0b100001101010,
+        };
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), Some(3));
+        assert_eq!(iter.next(), Some(5));
+        assert_eq!(iter.next(), Some(6));
+        assert_eq!(iter.next(), Some(11));
+        assert_eq!(iter.next(), None);
     }
 }

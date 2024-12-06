@@ -51,7 +51,7 @@ impl Solver for Solver01 {
 
         while let Some(observation) = observations.pop() {
             // 対数尤度の更新処理は重いので、時間がないときは多変量正規分布バージョンに切り替える
-            if input.since().elapsed().as_millis() >= 1500 {
+            if input.since().elapsed().as_millis() >= 1000 {
                 use_monte_carlo = false;
                 break;
             }
@@ -59,7 +59,7 @@ impl Solver for Solver01 {
             monte_carlo_sampler.update(&observation);
         }
 
-        let each_duration = (2.85 - input.since().elapsed().as_secs_f64()) / arrange_count as f64;
+        let each_duration = (2.8 - input.since().elapsed().as_secs_f64()) / arrange_count as f64;
 
         for _ in 0..arrange_count {
             let mut arranger = arranger::get_arranger(each_duration);
