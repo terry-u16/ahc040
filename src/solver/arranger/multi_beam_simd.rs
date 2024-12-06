@@ -46,7 +46,7 @@ impl Arranger for MultiBeamArrangerSimd {
             remaining_time,
             standard_beam_width,
             1,
-            20000,
+            30000,
             1,
         );
         let deduplicator = beam::HashSingleDeduplicator::new();
@@ -69,6 +69,8 @@ struct LargeState {
     rects_w: [AlignedU16; Input::MAX_RECT_CNT],
     widths: AlignedU16,
     heights: AlignedU16,
+    width_limit: AlignedU16,
+    height_limit: AlignedU16,
     placements_x0: [AlignedU16; Input::MAX_RECT_CNT],
     placements_x1: [AlignedU16; Input::MAX_RECT_CNT],
     placements_y0: [AlignedU16; Input::MAX_RECT_CNT],
@@ -121,11 +123,16 @@ impl LargeState {
         // 10%余裕を持たせる
         let default_width = AlignedU16(areas.map(|a| (a as f64 * 1.1).sqrt() as u16));
 
+        let width_limit = default_width;
+        let height_limit = AlignedU16([u16::MAX / 2; AVX2_U16_W]);
+
         Self {
             rects_h,
             rects_w,
             widths: default_width,
             heights: AlignedU16::ZERO,
+            width_limit,
+            height_limit,
             placements_x0: placements.clone(),
             placements_x1: placements.clone(),
             placements_y0: placements.clone(),
@@ -281,6 +288,8 @@ impl ActGen {
         let hash_base_x = &large_state.hash_base_x;
         let hash_base_y = &large_state.hash_base_y;
         let hash_base_rot = &large_state.hash_base_rot;
+        let width_limit = large_state.width_limit;
+        let height_limit = large_state.height_limit;
 
         unsafe {
             self.gen_cand(
@@ -301,6 +310,8 @@ impl ActGen {
                 hash_base_rot,
                 available_base_left_xor,
                 available_base_up_xor,
+                width_limit,
+                height_limit,
             )
         }
     }
@@ -329,6 +340,8 @@ impl ActGen {
         let hash_base_rot = &large_state.hash_base_rot;
         let (available_base_left_xor, available_base_up_xor) =
             (available_base_up_xor, available_base_left_xor);
+        let width_limit = large_state.height_limit;
+        let height_limit = large_state.width_limit;
 
         let state = unsafe {
             self.gen_cand(
@@ -349,6 +362,8 @@ impl ActGen {
                 hash_base_rot,
                 available_base_left_xor,
                 available_base_up_xor,
+                width_limit,
+                height_limit,
             )
         };
 
@@ -377,6 +392,8 @@ impl ActGen {
         hash_base_rot: &[u32],
         available_base_left_xor: u128,
         available_base_up_xor: u128,
+        width_limit: AlignedU16,
+        height_limit: AlignedU16,
     ) -> Option<SmallState> {
         if rotate {
             std::mem::swap(&mut rect_w, &mut rect_h);
@@ -412,6 +429,16 @@ impl ActGen {
         }
 
         let x1 = _mm256_add_epi16(x0, rect_w);
+
+        // リミット超えたらNG
+        let width_limit = _mm256_cmpgt_epi16(x1, width_limit.load());
+        let height_limit = _mm256_cmpgt_epi16(y1, height_limit.load());
+        let over_limit = _mm256_or_si256(width_limit, height_limit);
+        let over_limit = horizontal_or_u16(over_limit);
+
+        if over_limit > 0 {
+            return None;
+        }
 
         // 側面がピッタリくっついているかチェック
         let is_touching = match base {
@@ -523,15 +550,14 @@ impl ActGen {
         }
 
         let prev_turn = turn - 1;
-        let placements_x1 = &large_state.placements_x1[..prev_turn];
-        let placements_y1 = &large_state.placements_y1[..prev_turn];
+        let placements_x1 = &large_state.placements_x1;
+        let placements_y1 = &large_state.placements_y1;
 
         let new_x1 = large_state.placements_x1[prev_turn];
         let new_y0 = large_state.placements_y0[prev_turn];
         let new_y1 = large_state.placements_y1[prev_turn];
-
-        // prev_turnに置いたrectは必ずvalidなので対象外とする
-        let available_flag = large_state.avaliable_base_left & !(1 << prev_turn);
+        let available_flag = large_state.avaliable_base_left;
+        let width_limit = large_state.width_limit;
 
         unsafe {
             Self::get_invalid_bases(
@@ -541,6 +567,7 @@ impl ActGen {
                 new_y0,
                 new_y1,
                 available_flag,
+                width_limit,
             )
         }
     }
@@ -552,15 +579,14 @@ impl ActGen {
 
         // x, yを反転させて呼び出す
         let prev_turn = turn - 1;
-        let placements_x1 = &large_state.placements_y1[..prev_turn];
-        let placements_y1 = &large_state.placements_x1[..prev_turn];
+        let placements_x1 = &large_state.placements_y1;
+        let placements_y1 = &large_state.placements_x1;
 
         let new_x1 = large_state.placements_y1[prev_turn];
         let new_y0 = large_state.placements_x0[prev_turn];
         let new_y1 = large_state.placements_x1[prev_turn];
-
-        // prev_turnに置いたrectは必ずvalidなので対象外とする
-        let available_flag = large_state.avaliable_base_up & !(1 << prev_turn);
+        let available_flag = large_state.avaliable_base_up;
+        let width_limit = large_state.height_limit;
 
         unsafe {
             Self::get_invalid_bases(
@@ -570,6 +596,7 @@ impl ActGen {
                 new_y0,
                 new_y1,
                 available_flag,
+                width_limit,
             )
         }
     }
@@ -582,6 +609,7 @@ impl ActGen {
         new_y0: AlignedU16,
         new_y1: AlignedU16,
         available_flag: u128,
+        width_limit: AlignedU16,
     ) -> u128 {
         unsafe {
             const MIN_EDGE_LEN: u16 = round_u16(20000);
@@ -590,29 +618,32 @@ impl ActGen {
             let new_x1 = new_x1.load();
             let new_y0 = new_y0.load();
             let new_y1 = new_y1.load();
+            let width_limit = width_limit.load();
 
             for rect_i in BitSetIterU128::new(available_flag) {
                 let xi1 = placements_x1[rect_i].load();
                 let yi1 = placements_y1[rect_i].load();
 
+                // 条件1: rect_iにピッタリくっつけられる可能性がないとダメ
+                //        つまりrect_iの右側に邪魔者がいるとダメ
                 // Yi1 + MIN_EDGE_LEN
                 let yi1pl0 = _mm256_add_epi16(yi1, min_edge_len);
-
-                // 新しく無効となった箱フラグ
-                let mut invalid = _mm256_setzero_si256();
 
                 // max(yi1, yj0) < min(yi1 + l0, yj1)
                 let max = _mm256_max_epu16(yi1, new_y0);
                 let min = _mm256_min_epu16(yi1pl0, new_y1);
                 let pred_y = _mm256_cmpgt_epi16(min, max);
 
-                // x_i1 ≦ x_j1
-                // AVX2に整数の≦はないので、x_i1 > x_j1 を求めたあとにAND_NOTを取る
-                let pred_x_not = _mm256_cmpgt_epi16(xi1, new_x1);
-                let pred = _mm256_andnot_si256(pred_x_not, pred_y);
-                invalid = _mm256_or_si256(invalid, pred);
+                // x_i1 < x_j1
+                let invalid_base = _mm256_cmpgt_epi16(new_x1, xi1);
 
-                // invalidなものが1つでもあったらピッタリくっつけられないのでNG
+                // 条件2: 置いたときにwidth_limitを超えるとダメ
+                let next_x = _mm256_add_epi16(new_x1, min_edge_len);
+                let invalid_width_limit = _mm256_cmpgt_epi16(next_x, width_limit);
+
+                // invalidなものが1つでもあったらNG
+                let invalid = _mm256_or_si256(invalid_base, invalid_width_limit);
+                let invalid = _mm256_and_si256(pred_y, invalid);
                 let is_invalid = horizontal_or_u16(invalid) > 0;
                 invalid_flag |= (is_invalid as u128) << rect_i;
             }
