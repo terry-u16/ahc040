@@ -115,6 +115,7 @@ impl LargeState {
         }
 
         // 10%余裕を持たせる
+        // TODO: パラメータ調整
         let default_width = AlignedU16(areas.map(|a| (a as f64 * 1.1).sqrt() as u16));
 
         let width_limit = default_width;
@@ -267,6 +268,7 @@ struct ActGen {
 
 impl ActGen {
     fn new() -> Self {
+        // TODO: パラメータ調整
         const SCORE_MUL: f32 = 0.9;
         let score_mul_low: [f32; AVX2_F32_W] = std::array::from_fn(|i| SCORE_MUL.powi(i as i32));
         let score_mul_high: [f32; AVX2_F32_W] =
