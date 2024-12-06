@@ -59,7 +59,7 @@ impl Solver for Solver01 {
             monte_carlo_sampler.update(&observation);
         }
 
-        let each_duration = (2.85 - input.since().elapsed().as_secs_f64()) / arrange_count as f64;
+        let each_duration = (2.8 - input.since().elapsed().as_secs_f64()) / arrange_count as f64;
         let mut arranger = arranger::get_arranger(each_duration);
 
         for _ in 0..arrange_count {

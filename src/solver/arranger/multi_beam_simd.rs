@@ -82,6 +82,7 @@ struct LargeState {
     turn: usize,
     avaliable_base_left: u128,
     avaliable_base_up: u128,
+    min_rect_size: AlignedU16,
 }
 
 impl LargeState {
@@ -126,6 +127,22 @@ impl LargeState {
         let width_limit = default_width;
         let height_limit = AlignedU16([u16::MAX / 2; AVX2_U16_W]);
 
+        let min_rect_size = unsafe {
+            let mut min = _mm256_set1_epi16(i16::MAX);
+
+            for size in rects_h[..input.rect_cnt()]
+                .iter()
+                .chain(rects_w[..input.rect_cnt()].iter())
+            {
+                min = _mm256_min_epu16(min, size.load());
+            }
+
+            let mut min_rect_size: [u16; AVX2_U16_W] = [0; AVX2_U16_W];
+            _mm256_storeu_si256(min_rect_size.as_mut_ptr() as *mut __m256i, min);
+
+            AlignedU16(min_rect_size)
+        };
+
         Self {
             rects_h,
             rects_w,
@@ -144,6 +161,7 @@ impl LargeState {
             turn: 0,
             avaliable_base_left: 0,
             avaliable_base_up: 0,
+            min_rect_size,
         }
     }
 }
@@ -558,6 +576,7 @@ impl ActGen {
         let new_y1 = large_state.placements_y1[prev_turn];
         let available_flag = large_state.avaliable_base_left;
         let width_limit = large_state.width_limit;
+        let min_rect_size = large_state.min_rect_size;
 
         unsafe {
             Self::get_invalid_bases(
@@ -568,6 +587,7 @@ impl ActGen {
                 new_y1,
                 available_flag,
                 width_limit,
+                min_rect_size,
             )
         }
     }
@@ -587,6 +607,7 @@ impl ActGen {
         let new_y1 = large_state.placements_x1[prev_turn];
         let available_flag = large_state.avaliable_base_up;
         let width_limit = large_state.height_limit;
+        let min_rect_size = large_state.min_rect_size;
 
         unsafe {
             Self::get_invalid_bases(
@@ -597,6 +618,7 @@ impl ActGen {
                 new_y1,
                 available_flag,
                 width_limit,
+                min_rect_size,
             )
         }
     }
@@ -610,15 +632,15 @@ impl ActGen {
         new_y1: AlignedU16,
         available_flag: u128,
         width_limit: AlignedU16,
+        min_rect_size: AlignedU16,
     ) -> u128 {
         unsafe {
-            const MIN_EDGE_LEN: u16 = round_u16(20000);
             let mut invalid_flag = 0;
-            let min_edge_len = _mm256_set1_epi16(MIN_EDGE_LEN as i16);
             let new_x1 = new_x1.load();
             let new_y0 = new_y0.load();
             let new_y1 = new_y1.load();
             let width_limit = width_limit.load();
+            let min_rect_size = min_rect_size.load();
 
             for rect_i in BitSetIterU128::new(available_flag) {
                 let xi1 = placements_x1[rect_i].load();
@@ -626,8 +648,8 @@ impl ActGen {
 
                 // 条件1: rect_iにピッタリくっつけられる可能性がないとダメ
                 //        つまりrect_iの右側に邪魔者がいるとダメ
-                // Yi1 + MIN_EDGE_LEN
-                let yi1pl0 = _mm256_add_epi16(yi1, min_edge_len);
+                // Yi1 + MIN_RECT_SIZE
+                let yi1pl0 = _mm256_add_epi16(yi1, min_rect_size);
 
                 // max(yi1, yj0) < min(yi1 + l0, yj1)
                 let max = _mm256_max_epu16(yi1, new_y0);
@@ -638,7 +660,7 @@ impl ActGen {
                 let invalid_base = _mm256_cmpgt_epi16(new_x1, xi1);
 
                 // 条件2: 置いたときにwidth_limitを超えるとダメ
-                let next_x = _mm256_add_epi16(new_x1, min_edge_len);
+                let next_x = _mm256_add_epi16(new_x1, min_rect_size);
                 let invalid_width_limit = _mm256_cmpgt_epi16(next_x, width_limit);
 
                 // invalidなものが1つでもあったらNG
