@@ -39,10 +39,10 @@ impl Arranger for MultiBeamArrangerSimd {
 
         let remaining_time = self.duration_sec - since.elapsed().as_secs_f64();
         let mut beam = beam::BeamSearch::new(act_gen);
-        let standard_beam_width = 2_000_000 / (input.rect_cnt() as usize).pow(2);
+        let standard_beam_width = 100_000 / (input.rect_cnt() as usize);
         let beam_width_suggester = BayesianBeamWidthSuggester::new(
             input.rect_cnt(),
-            5,
+            8,
             remaining_time,
             standard_beam_width,
             1,
