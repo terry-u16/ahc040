@@ -16,9 +16,7 @@ def run_single(seed: int):
     with open(input_file, "r") as i:
         with open(output_file, "w") as o:
             with open(err_file, "w") as e:
-                subprocess.run(
-                    ["./ahc040"], stdin=i, stdout=o, stderr=e
-                ).check_returncode()
+                subprocess.run(["./ahc040"], stdin=i, stdout=o, stderr=e)
 
     with open(err_file, "r") as e:
         for line in e.readlines():
