@@ -2,16 +2,11 @@ use super::Arranger;
 use crate::{
     beam::{self, BayesianBeamWidthSuggester},
     problem::{Dir, Input, Op},
-    solver::{
-        estimator::Sampler,
-        simd::{
-            horizontal_and_16, horizontal_or_16, horizontal_xor_16, round_u16, AlignedU16,
-            SimdRectSet, AVX2_U16_W,
-        },
-    },
+    solver::{estimator::Sampler, simd::*},
     util::BitSetIterU128,
 };
 use itertools::izip;
+use ordered_float::OrderedFloat;
 use rand::Rng;
 use std::arch::x86_64::*;
 
@@ -40,7 +35,7 @@ impl Arranger for MultiBeamArrangerSimd {
         let rects = sampler.sample(rng);
         let large_state = unsafe { LargeState::new(input.clone(), rects, rng) };
         let small_state = SmallState::default();
-        let act_gen = ActGen;
+        let act_gen = ActGen::new();
 
         let remaining_time = self.duration_sec - since.elapsed().as_secs_f64();
         let mut beam = beam::BeamSearch::new(act_gen);
@@ -159,7 +154,7 @@ struct SmallState {
     hash: u32,
     hash_xor: u32,
     op: Op,
-    score: i32,
+    score: f32,
     avaliable_base_left_xor: u128,
     avaliable_base_up_xor: u128,
 }
@@ -206,13 +201,13 @@ impl Default for SmallState {
 }
 
 impl beam::SmallState for SmallState {
-    type Score = i32;
+    type Score = OrderedFloat<f32>;
     type Hash = u32;
     type LargeState = LargeState;
     type Action = Op;
 
     fn raw_score(&self) -> Self::Score {
-        self.score
+        OrderedFloat(-self.score)
     }
 
     fn hash(&self) -> Self::Hash {
@@ -247,9 +242,26 @@ impl beam::SmallState for SmallState {
     }
 }
 
-struct ActGen;
+struct ActGen {
+    score_mul_low: AlignedF32,
+    score_mul_high: AlignedF32,
+}
 
 impl ActGen {
+    fn new() -> Self {
+        const SCORE_MUL: f32 = 0.9;
+        let score_mul_low: [f32; AVX2_F32_W] = std::array::from_fn(|i| SCORE_MUL.powi(i as i32));
+        let score_mul_high: [f32; AVX2_F32_W] =
+            std::array::from_fn(|i| SCORE_MUL.powi((i + AVX2_F32_W) as i32));
+        eprintln!("score_mul_low: {:?}", score_mul_low);
+        eprintln!("score_mul_high: {:?}", score_mul_high);
+
+        Self {
+            score_mul_low: AlignedF32(score_mul_low),
+            score_mul_high: AlignedF32(score_mul_high),
+        }
+    }
+
     fn gen_left_cand(
         &self,
         large_state: &LargeState,
@@ -431,7 +443,8 @@ impl ActGen {
         };
 
         // ピッタリくっついていないものがあったらNG
-        let is_touching = horizontal_and_16(is_touching);
+        let is_touching = horizontal_and_u16(is_touching);
+
         if is_touching == 0 {
             return None;
         }
@@ -448,16 +461,14 @@ impl ActGen {
 
         let mul_hi = _mm256_xor_si256(x_mul_hi, y_mul_hi);
         let mul_lo = _mm256_xor_si256(x_mul_lo, y_mul_lo);
-        let mul_hi_xor = horizontal_xor_16(mul_hi) as u32;
-        let mul_lo_xor = horizontal_xor_16(mul_lo) as u32;
+        let mul_hi_xor = horizontal_xor_u16(mul_hi) as u32;
+        let mul_lo_xor = horizontal_xor_u16(mul_lo) as u32;
 
         // 適当に並べる
         // xとyの対称性がないとflip時に壊れるので注意
         let mut hash_xor = (mul_hi_xor << 16) | mul_lo_xor;
 
-        if rotate {
-            hash_xor ^= hash_base_rot[turn];
-        }
+        hash_xor ^= hash_base_rot[turn] * rotate as u32;
 
         let heights = heights.load();
         let widths = widths.load();
@@ -468,20 +479,21 @@ impl ActGen {
         // スコアの昇順にソートした上で、減衰させながら和を取る
         // （期待値を最大化するよりは上振れを狙いたいため）
         let score = _mm256_add_epi16(new_height, new_width);
-        let mut scores = [0u16; AVX2_U16_W];
-        _mm256_storeu_si256(scores.as_mut_ptr() as *mut __m256i, score);
-        scores.sort_unstable();
+        let score = bitonic_sort_u16(score);
 
-        let mut mul = 1.0;
-        let mut score = 0.0;
-        const RATE: f64 = 0.9;
+        // u16 x 16 -> (u32 x 8) x 2 -> (f32 x 8) x 2
+        let score_low = _mm256_castsi256_si128(score);
+        let score_high = _mm256_extracti128_si256(score, 1);
+        let score_u32_low = _mm256_cvtepu16_epi32(score_low);
+        let score_u32_high = _mm256_cvtepu16_epi32(score_high);
+        let score_f32_low = _mm256_cvtepi32_ps(score_u32_low);
+        let score_f32_high = _mm256_cvtepi32_ps(score_u32_high);
 
-        for &x in scores.iter() {
-            score -= x as f64 * mul;
-            mul *= RATE;
-        }
-
-        let score = score.round() as i32;
+        // 用意していた係数とかける
+        let score_low = _mm256_mul_ps(score_f32_low, self.score_mul_low.load());
+        let score_high = _mm256_mul_ps(score_f32_high, self.score_mul_high.load());
+        let score = _mm256_add_ps(score_low, score_high);
+        let score = horizontal_add_f32(score);
 
         let hash = hash ^ hash_xor;
         let op = Op::new(turn, rotate, Dir::Left, base);
@@ -603,7 +615,7 @@ impl ActGen {
                 invalid = _mm256_or_si256(invalid, pred);
 
                 // invalidなものが1つでもあったらピッタリくっつけられないのでNG
-                let is_invalid = horizontal_or_16(invalid) > 0;
+                let is_invalid = horizontal_or_u16(invalid) > 0;
                 invalid_flag |= (is_invalid as u128) << rect_i;
             }
 
