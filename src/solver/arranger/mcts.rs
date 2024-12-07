@@ -178,20 +178,21 @@ impl Node {
                 return i;
             }
 
+            // UCB1-Tuned
             let count = self.node_count.0[i];
             let score = self.node_score.0[i];
             let total_count = self.total_count as f32;
             let inv_count = 1.0 / count;
             let total_count_ln = total_count.ln();
 
-            // UCB1-Tuned
             let sq_average = self.score_squared_sum.0[i] / count;
-            let average = score / count;
-            let average_sq = average * average;
+            let average_score = score / count;
+            let average_sq = average_score * average_score;
             let variance = sq_average - average_sq;
 
+            // TODO: パラメータ調整
             let var = variance + (2.0 * total_count_ln * inv_count).sqrt();
-            let ucb1 = score * (var.min(0.25) * total_count_ln * inv_count).sqrt();
+            let ucb1 = average_score + (var.min(0.25) * total_count_ln * inv_count).sqrt();
 
             if best_ucb1.change_max(ucb1) {
                 best_index = i;
@@ -203,6 +204,11 @@ impl Node {
 
     fn expand(&mut self, state: &State) {
         self.is_expanded = true;
+
+        if state.turn == state.rect_count {
+            return;
+        }
+
         let actions = state.gen_all_actions();
 
         // 全てのbitが1のf32を作る
