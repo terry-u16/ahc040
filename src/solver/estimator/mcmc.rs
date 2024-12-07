@@ -48,9 +48,7 @@ impl MCMCSampler {
     }
 
     pub(crate) fn sample(&mut self, duration: f64, rng: &mut impl Rng) -> SimdRectSet {
-        eprintln!("{:?}", self.state.log_likelihood);
         self.state = mcmc(&self.env, self.state.clone(), duration, rng);
-        eprintln!("{:?}", self.state.log_likelihood);
 
         let mut heights = vec![];
         let mut widths = vec![];
@@ -552,14 +550,15 @@ impl Neighbor {
         };
 
         let mut delta = [0; AVX2_U16_W];
-        let dist = Normal::new(0.0, std_dev).unwrap();
         const LOWER_BOUND: u16 = round_u16(20000);
         const UPPER_BOUND: u16 = round_u16(100000);
 
         for i in 0..AVX2_U16_W {
+            let len = current.0[i] as f64;
+            let dist = Normal::new(0.0, len * 0.005).unwrap();
+
             delta[i] = loop {
-                let d = dist.sample(rng);
-                let d = round_i16(d as i32) as i16;
+                let d = dist.sample(rng).round() as i16;
                 let new_x = current.0[i].wrapping_add_signed(d);
 
                 if d != 0 && LOWER_BOUND <= new_x && new_x <= UPPER_BOUND {
@@ -575,6 +574,8 @@ impl Neighbor {
 fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> State {
     let since = std::time::Instant::now();
     let mut all_iter = 0;
+    let mut accepted = 0;
+    let mut rejected = 0;
 
     loop {
         if since.elapsed().as_secs_f64() >= duration {
@@ -603,8 +604,10 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> State
 
             if rng.gen_range(0.0..1.0) < (-(prev_log_likelihood - new_log_likelihood[j].0[k])).exp()
             {
+                accepted += 1;
                 state.log_likelihood[j].0[k] = new_log_likelihood[j].0[k];
             } else {
+                rejected += 1;
                 if neighbor.is_width {
                     state.rect_w[neighbor.rect_i].0[i] =
                         state.rect_w[neighbor.rect_i].0[i].wrapping_add_signed(-neighbor.delta[i]);
@@ -619,6 +622,7 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> State
     }
 
     eprintln!("mcmc_iter: {}", all_iter);
+    eprintln!("accepted: {} / {}", accepted, accepted + rejected);
 
     state
 }

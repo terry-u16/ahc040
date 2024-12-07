@@ -95,6 +95,7 @@ impl Solver for Solver01 {
             let first_step_turn = input.rect_cnt() - 15;
 
             let sampled_rects = mcmc_sampler.sample(mcmc_duration, &mut rng);
+            //let sampled_rects = gauss_sampler.sample(&mut rng);
 
             let ops1 = beam_arranger.arrange(
                 &input,
