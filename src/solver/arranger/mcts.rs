@@ -48,27 +48,28 @@ impl MCTSArranger {
 #[derive(Debug, Clone)]
 struct Node {
     action: Action,
-    node_score: AlignedF32,
-    node_count: AlignedF32,
-    score_squared_sum: AlignedF32,
+    node_score: [f32; Self::CANDIDATE_COUNT],
+    node_count: [f32; Self::CANDIDATE_COUNT],
+    score_squared_sum: [f32; Self::CANDIDATE_COUNT],
     total_count: usize,
     is_expanded: bool,
-    valid_mask: AlignedF32,
-    candidates: [Option<Box<Node>>; AVX2_F32_W],
+    is_valid: [bool; Self::CANDIDATE_COUNT],
+    candidates: [Option<Box<Node>>; Self::CANDIDATE_COUNT],
 }
 
 impl Node {
     const EXPANSION_THRESHOLD: usize = 3;
+    const CANDIDATE_COUNT: usize = 2;
 
     fn new(action: Action) -> Self {
         Self {
             action,
-            node_score: AlignedF32::default(),
-            node_count: AlignedF32::default(),
-            score_squared_sum: AlignedF32::default(),
+            node_score: Default::default(),
+            node_count: Default::default(),
+            score_squared_sum: Default::default(),
             total_count: 0,
             is_expanded: false,
-            valid_mask: AlignedF32::default(),
+            is_valid: Default::default(),
             candidates: std::array::from_fn(|_| None),
         }
     }
@@ -95,9 +96,9 @@ impl Node {
             child.action.apply(state);
             let (score, updated) = child.evaluate(state, best_score, best_ops, rng);
 
-            self.node_score.0[child_index] += score;
-            self.node_count.0[child_index] += 1.0;
-            self.score_squared_sum.0[child_index] += score * score;
+            self.node_score[child_index] += score;
+            self.node_count[child_index] += 1.0;
+            self.score_squared_sum[child_index] += score * score;
             (score, updated)
         } else {
             // Bottom-Left法でプレイアウト
@@ -169,23 +170,23 @@ impl Node {
         let mut best_ucb1 = f32::NEG_INFINITY;
         let mut best_index = 0;
 
-        for i in 0..AVX2_F32_W {
-            if self.valid_mask.0[i] == 0.0 {
+        for i in 0..Self::CANDIDATE_COUNT {
+            if !self.is_valid[i] {
                 continue;
             }
 
-            if self.node_count.0[i] == 0.0 {
+            if self.node_count[i] == 0.0 {
                 return i;
             }
 
             // UCB1-Tuned
-            let count = self.node_count.0[i];
-            let score = self.node_score.0[i];
+            let count = self.node_count[i];
+            let score = self.node_score[i];
             let total_count = self.total_count as f32;
             let inv_count = 1.0 / count;
             let total_count_ln = total_count.ln();
 
-            let sq_average = self.score_squared_sum.0[i] / count;
+            let sq_average = self.score_squared_sum[i] / count;
             let average_score = score / count;
             let average_sq = average_score * average_score;
             let variance = sq_average - average_sq;
@@ -211,31 +212,15 @@ impl Node {
 
         let actions = state.gen_all_actions();
 
-        // 全てのbitが1のf32を作る
-        let valid_mask_v = f32::from_bits(!0);
-        let mut candidates: [Option<Action>; 8] = [None; AVX2_F32_W];
+        let mut candidates: [Option<Action>; Self::CANDIDATE_COUNT] = [None; Self::CANDIDATE_COUNT];
 
-        'outer: for action in actions {
+        for action in actions {
             let mut worst_bottom_left = action.bottom_left_value();
             let mut worst_index = None;
 
-            // 回転あり・なしで4個ずつ生成したい
-            // 前4つを回転なし、後4つを回転ありとする
-            let rotation_offset = action.op.rotate() as usize * AVX2_F32_W / 2;
-
-            for i in 0..AVX2_F32_W / 2 {
-                let index = rotation_offset + i;
-
+            for index in 0..Self::CANDIDATE_COUNT {
                 let bl = match candidates[index] {
-                    Some(ref candidate) => {
-                        let duplicated = unsafe { candidate.are_same_placement(&action) };
-
-                        if duplicated {
-                            continue 'outer;
-                        }
-
-                        candidate.bottom_left_value()
-                    }
+                    Some(ref candidate) => candidate.bottom_left_value(),
                     None => std::u64::MAX,
                 };
 
@@ -246,7 +231,7 @@ impl Node {
 
             if let Some(index) = worst_index {
                 candidates[index] = Some(action);
-                self.valid_mask.0[index] = valid_mask_v;
+                self.is_valid[index] = true;
             }
         }
 
