@@ -1,8 +1,7 @@
-use super::Arranger;
 use crate::{
     beam::{self, BayesianBeamWidthSuggester},
     problem::{Dir, Input, Op},
-    solver::{estimator::Sampler, simd::*},
+    solver::simd::*,
     util::BitSetIterU128,
 };
 use itertools::izip;
@@ -15,11 +14,10 @@ use std::arch::x86_64::*;
 /// 内部的にAVX2を使用して高速化している。
 pub struct MultiBeamArrangerSimd;
 
-impl Arranger for MultiBeamArrangerSimd {
-    fn arrange(
+impl MultiBeamArrangerSimd {
+    pub fn arrange(
         &mut self,
         input: &Input,
-        start_ops: &[Op],
         end_turn: usize,
         rects: SimdRectSet,
         rng: &mut impl Rng,

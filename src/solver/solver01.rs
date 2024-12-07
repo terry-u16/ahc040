@@ -5,7 +5,7 @@ use super::{
 use crate::{
     problem::{Input, Judge},
     solver::{
-        arranger::{self, mcts::MCTSArranger, multi_beam_simd::MultiBeamArrangerSimd, Arranger},
+        arranger::{mcts::MCTSArranger, multi_beam_simd::MultiBeamArrangerSimd},
         estimator::{self, Observation2d, Sampler as _, UpdatableSampler},
     },
 };
@@ -74,7 +74,6 @@ impl Solver for Solver01 {
             let ops1 = if use_monte_carlo {
                 beam_arranger.arrange(
                     &input,
-                    &[],
                     first_step_turn,
                     rects.clone(),
                     &mut rng,
@@ -83,7 +82,6 @@ impl Solver for Solver01 {
             } else {
                 beam_arranger.arrange(
                     &input,
-                    &[],
                     first_step_turn,
                     rects.clone(),
                     &mut rng,
@@ -92,23 +90,9 @@ impl Solver for Solver01 {
             };
 
             let ops2 = if use_monte_carlo {
-                mcts_arranger.arrange(
-                    &input,
-                    &ops1,
-                    input.rect_cnt(),
-                    rects,
-                    &mut rng,
-                    mcts_duration,
-                )
+                mcts_arranger.arrange(&input, &ops1, rects, &mut rng, mcts_duration)
             } else {
-                mcts_arranger.arrange(
-                    &input,
-                    &ops1,
-                    input.rect_cnt(),
-                    rects,
-                    &mut rng,
-                    mcts_duration,
-                )
+                mcts_arranger.arrange(&input, &ops1, rects, &mut rng, mcts_duration)
             };
 
             let mut ops = ops1;

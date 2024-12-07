@@ -9,16 +9,13 @@ use crate::{
 use core::f32;
 use std::{arch::x86_64::*, u64};
 
-use super::Arranger;
-
 pub struct MCTSArranger;
 
-impl Arranger for MCTSArranger {
-    fn arrange(
+impl MCTSArranger {
+    pub fn arrange(
         &mut self,
         input: &Input,
         start_ops: &[Op],
-        end_turn: usize,
         rects: SimdRectSet,
         rng: &mut impl Rng,
         duration_sec: f64,
