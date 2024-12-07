@@ -1,3 +1,4 @@
+mod mcts;
 mod multi_beam_simd;
 
 use super::estimator::Sampler;
@@ -15,5 +16,6 @@ pub(super) trait Arranger {
 }
 
 pub(super) fn get_arranger() -> impl Arranger {
-    multi_beam_simd::MultiBeamArrangerSimd
+    //multi_beam_simd::MultiBeamArrangerSimd
+    mcts::MCTSArranger
 }
