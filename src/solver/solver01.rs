@@ -68,7 +68,7 @@ impl Solver for Solver01 {
                 (2.9 - input.since().elapsed().as_secs_f64()) / remaining_arrange_count as f64;
             let beam_duration = duration * 0.5;
             let mcts_duration = duration * 0.5;
-            let first_step_turn = input.rect_cnt() - 12;
+            let first_step_turn = input.rect_cnt() - 15;
             let rects = gauss_sampler.sample(&mut rng);
 
             let ops1 = if use_monte_carlo {
