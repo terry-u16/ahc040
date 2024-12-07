@@ -731,25 +731,6 @@ impl beam::ActGen<SmallState> for ActGen {
         let rotates = [false, true];
 
         for rotate in rotates {
-            // Left
-            next_states.extend(self.gen_left_cand(
-                &large_state,
-                None,
-                rotate,
-                invalid_bases_left,
-                invalid_bases_up,
-            ));
-
-            for i in BitSetIterU128::new(avaliable_bases_left) {
-                next_states.extend(self.gen_left_cand(
-                    &large_state,
-                    Some(i),
-                    rotate,
-                    invalid_bases_left,
-                    invalid_bases_up,
-                ));
-            }
-
             // Up
             next_states.extend(self.gen_up_cand(
                 &large_state,

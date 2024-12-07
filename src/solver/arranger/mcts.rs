@@ -427,12 +427,6 @@ impl State {
         let mut actions = vec![];
 
         for rotate in rotates {
-            actions.extend(self.gen_left_action(None, rotate, left_xor, up_xor));
-
-            for base in BitSetIterU128::new(left_cands) {
-                actions.extend(self.gen_left_action(Some(base), rotate, left_xor, up_xor));
-            }
-
             actions.extend(self.gen_up_action(None, rotate, left_xor, up_xor));
 
             for base in BitSetIterU128::new(up_cands) {
@@ -458,25 +452,6 @@ impl State {
 
         for action in BitSetIterU128::new(up_cands)
             .map(|base| self.gen_up_action(Some(base), rotate, left_xor, up_xor))
-            .flatten()
-        {
-            let score = action.bottom_left_value();
-            if best_score.change_min(score) {
-                best_action = action;
-            }
-        }
-
-        let action = self.gen_left_action(None, rotate, left_xor, up_xor);
-
-        if let Some(action) = action {
-            let score = action.bottom_left_value();
-            if best_score.change_min(score) {
-                best_action = action;
-            }
-        }
-
-        for action in BitSetIterU128::new(left_cands)
-            .map(|base| self.gen_left_action(Some(base), rotate, left_xor, up_xor))
             .flatten()
         {
             let score = action.bottom_left_value();
