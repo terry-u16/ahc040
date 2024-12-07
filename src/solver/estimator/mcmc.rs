@@ -12,42 +12,65 @@ use core::arch::x86_64::*;
 use itertools::izip;
 use rand::prelude::*;
 use rand_distr::Normal;
-use rand_pcg::Pcg64Mcg;
 
 pub(crate) struct MCMCSampler {
+    env: Env,
+    state: State,
+}
+
+impl MCMCSampler {
+    pub(crate) fn new(
+        input: &Input,
+        observations: Vec<Observation2d>,
+        rects: SimdRectSet,
+        rect_std_dev: RectStdDev,
+        init_duration: f64,
+        rng: &mut impl Rng,
+    ) -> Self {
+        let env = Env::new(
+            observations,
+            input.rect_cnt(),
+            input.std_dev(),
+            rect_std_dev,
+        );
+        let heights = rects.heights.iter().map(|&h| AlignedU16(h)).collect();
+        let widths = rects.widths.iter().map(|&w| AlignedU16(w)).collect();
+        let state = State::new(&env, widths, heights);
+        let state = mcmc(&env, state, init_duration, rng);
+
+        Self { env, state }
+    }
+
+    pub(crate) fn update(&mut self, observation: Observation2d) {
+        self.env.observations.push(observation);
+        self.state.log_likelihood = unsafe { self.state.calc_log_likelihood(&self.env) };
+    }
+
+    pub(crate) fn sample(&mut self, duration: f64, rng: &mut impl Rng) -> SimdRectSet {
+        self.state = mcmc(&self.env, self.state.clone(), duration, rng);
+
+        let mut heights = vec![];
+        let mut widths = vec![];
+
+        for (h, w) in izip!(&self.state.rect_h, &self.state.rect_w) {
+            heights.push(h.0);
+            widths.push(w.0);
+        }
+
+        SimdRectSet::new(heights, widths)
+    }
+}
+
+struct Env {
     observations: Vec<Observation2d>,
-    std_dev: f64,
-}
-
-pub(crate) fn test(
-    input: &Input,
-    observations: &[Observation2d],
-    rects: SimdRectSet,
-    rect_std_dev: RectStdDev,
-) {
-    let env = Env::new(
-        &observations,
-        input.rect_cnt(),
-        input.std_dev(),
-        rect_std_dev,
-    );
-    let heights = rects.heights.iter().map(|&h| AlignedU16(h)).collect();
-    let widths = rects.widths.iter().map(|&w| AlignedU16(w)).collect();
-    let state = State::new(&env, widths, heights);
-    let mut rng = Pcg64Mcg::new(42);
-    mcmc(&env, state, 0.1, &mut rng);
-}
-
-struct Env<'a> {
-    observations: &'a [Observation2d],
     rect_cnt: usize,
     std_dev: f64,
     rect_std_dev: RectStdDev,
 }
 
-impl<'a> Env<'a> {
+impl Env {
     fn new(
-        observations: &'a [Observation2d],
+        observations: Vec<Observation2d>,
         rect_cnt: usize,
         std_dev: f64,
         rect_std_dev: RectStdDev,
@@ -249,7 +272,6 @@ impl State {
                         let widths = &mut width;
 
                         self.pack_one_2d(
-                            turn,
                             op.base(),
                             rotate,
                             rect_i,
@@ -269,7 +291,6 @@ impl State {
                         let (heights, widths) = (&mut width, &mut height);
 
                         self.pack_one_2d(
-                            turn,
                             op.base(),
                             rotate,
                             rect_i,
@@ -317,7 +338,7 @@ impl State {
         y0.fill(AlignedU16::default());
         y1.fill(AlignedU16::default());
 
-        for (turn, &op) in ops.iter().enumerate() {
+        for &op in ops.iter() {
             // 真面目に衝突判定をする
             let rotate = op.rotate();
             let rect_i = op.rect_idx();
@@ -330,7 +351,6 @@ impl State {
                     let widths = &mut width;
 
                     self.pack_one_2d(
-                        turn,
                         op.base(),
                         rotate,
                         rect_i,
@@ -350,7 +370,6 @@ impl State {
                     let (heights, widths) = (&mut width, &mut height);
 
                     self.pack_one_2d(
-                        turn,
                         op.base(),
                         rotate,
                         rect_i,
@@ -373,7 +392,6 @@ impl State {
     #[target_feature(enable = "avx,avx2")]
     unsafe fn pack_one_2d(
         &self,
-        turn: usize,
         base: Option<usize>,
         rotate: bool,
         rect_i: usize,
