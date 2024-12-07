@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use core::arch::x86_64::*;
-use itertools::izip;
+use itertools::{izip, Itertools};
 use rand::prelude::*;
 use rand_distr::Normal;
 
@@ -28,6 +28,7 @@ impl MCMCSampler {
         rng: &mut impl Rng,
     ) -> Self {
         let env = Env::new(
+            input,
             observations,
             input.rect_cnt(),
             input.std_dev(),
@@ -47,18 +48,17 @@ impl MCMCSampler {
     }
 
     pub(crate) fn sample(&mut self, duration: f64, rng: &mut impl Rng) -> SimdRectSet {
+        eprintln!("{:?}", self.state.log_likelihood);
         self.state = mcmc(&self.env, self.state.clone(), duration, rng);
+        eprintln!("{:?}", self.state.log_likelihood);
 
         let mut heights = vec![];
         let mut widths = vec![];
 
         for (h, w) in izip!(&self.state.rect_h, &self.state.rect_w) {
-            eprint!("({}, {}) ", h.0[0], w.0[0]);
             heights.push(h.0);
             widths.push(w.0);
         }
-
-        eprintln!();
 
         SimdRectSet::new(heights, widths)
     }
@@ -66,6 +66,8 @@ impl MCMCSampler {
 
 struct Env {
     observations: Vec<Observation2d>,
+    init_measured_heights: Vec<AlignedF32>,
+    init_measured_widths: Vec<AlignedF32>,
     rect_cnt: usize,
     std_dev: f64,
     rect_std_dev: RectStdDev,
@@ -73,13 +75,33 @@ struct Env {
 
 impl Env {
     fn new(
+        input: &Input,
         observations: Vec<Observation2d>,
         rect_cnt: usize,
         std_dev: f64,
         rect_std_dev: RectStdDev,
     ) -> Self {
+        let init_measured_heights = input
+            .rect_measures()
+            .iter()
+            .map(|m| {
+                let h = round_u16(m.height()) as f32;
+                AlignedF32([h; AVX2_F32_W])
+            })
+            .collect_vec();
+        let init_measured_widths = input
+            .rect_measures()
+            .iter()
+            .map(|m| {
+                let w = round_u16(m.width()) as f32;
+                AlignedF32([w; AVX2_F32_W])
+            })
+            .collect_vec();
+
         Self {
             observations,
+            init_measured_heights,
+            init_measured_widths,
             rect_cnt,
             std_dev,
             rect_std_dev,
@@ -116,6 +138,52 @@ impl State {
         let mut log_likelihood_low = _mm256_setzero_ps();
         let mut log_likelihood_high = _mm256_setzero_ps();
         let inv_std_dev = _mm256_set1_ps(1.0 / round_u16(env.std_dev.round() as u32) as f32);
+
+        // 初期計測から
+        for (rect_h, rect_w, measured_h, measured_w) in izip!(
+            self.rect_h.iter(),
+            self.rect_w.iter(),
+            env.init_measured_heights.iter(),
+            env.init_measured_widths.iter()
+        ) {
+            // u16 x 16 -> (u32 x 8) x 2 -> (f32 x 8) x 2
+            let width = rect_w.load();
+            let height = rect_h.load();
+
+            let width_low = _mm256_castsi256_si128(width);
+            let width_high = _mm256_extracti128_si256(width, 1);
+            let width_u32_low = _mm256_cvtepu16_epi32(width_low);
+            let width_u32_high = _mm256_cvtepu16_epi32(width_high);
+            let width_f32_low = _mm256_cvtepi32_ps(width_u32_low);
+            let width_f32_high = _mm256_cvtepi32_ps(width_u32_high);
+
+            let height_low = _mm256_castsi256_si128(height);
+            let height_high = _mm256_extracti128_si256(height, 1);
+            let height_u32_low = _mm256_cvtepu16_epi32(height_low);
+            let height_u32_high = _mm256_cvtepu16_epi32(height_high);
+            let height_f32_low = _mm256_cvtepi32_ps(height_u32_low);
+            let height_f32_high = _mm256_cvtepi32_ps(height_u32_high);
+
+            let observed_x = measured_w.load();
+            let observed_y = measured_h.load();
+            let x_diff_low = _mm256_sub_ps(observed_x, width_f32_low);
+            let x_diff_high = _mm256_sub_ps(observed_x, width_f32_high);
+            let y_diff_low = _mm256_sub_ps(observed_y, height_f32_low);
+            let y_diff_high = _mm256_sub_ps(observed_y, height_f32_high);
+
+            let x_diff_low = _mm256_mul_ps(x_diff_low, inv_std_dev);
+            let x_diff_high = _mm256_mul_ps(x_diff_high, inv_std_dev);
+            let y_diff_low = _mm256_mul_ps(y_diff_low, inv_std_dev);
+            let y_diff_high = _mm256_mul_ps(y_diff_high, inv_std_dev);
+
+            // logP' = (x - μ)^2 + logP
+            log_likelihood_low = _mm256_fmadd_ps(x_diff_low, x_diff_low, log_likelihood_low);
+            log_likelihood_high = _mm256_fmadd_ps(x_diff_high, x_diff_high, log_likelihood_high);
+            log_likelihood_low = _mm256_fmadd_ps(y_diff_low, y_diff_low, log_likelihood_low);
+            log_likelihood_high = _mm256_fmadd_ps(y_diff_high, y_diff_high, log_likelihood_high);
+        }
+
+        // 配置結果から
         let mut x0_buf = [AlignedU16::default(); Input::MAX_RECT_CNT];
         let mut x1_buf = [AlignedU16::default(); Input::MAX_RECT_CNT];
         let mut y0_buf = [AlignedU16::default(); Input::MAX_RECT_CNT];

@@ -7,6 +7,7 @@ use crate::{
     solver::{
         arranger::{mcts::MCTSArranger, multi_beam_simd::MultiBeamArrangerSimd},
         estimator::{self, mcmc, Observation2d, Sampler as _, UpdatableSampler},
+        simd::round_u16,
     },
 };
 use rand::SeedableRng;
@@ -55,6 +56,35 @@ impl Solver for Solver01 {
         let mut beam_arranger = MultiBeamArrangerSimd;
         let mut mcts_arranger = MCTSArranger;
 
+        let gauss_rects = gauss_sampler.sample(&mut rng);
+        let rect_std_dev = estimator.rect_std_dev();
+
+        let mut mcmc_sampler = mcmc::MCMCSampler::new(
+            input,
+            observations.clone(),
+            gauss_rects.clone(),
+            rect_std_dev,
+            0.1,
+            &mut rng,
+        );
+
+        if let Some(actual_rects) = judge.rects() {
+            let mcmc_rects = mcmc_sampler.sample(0.01, &mut rng);
+
+            for i in 0..input.rect_cnt() {
+                eprintln!(
+                    "{:02}: ({:4}, {:4}) | ({:4}, {:4}) | ({:4}, {:4})",
+                    i,
+                    round_u16(actual_rects[i].height()),
+                    round_u16(actual_rects[i].width()),
+                    gauss_rects.heights[i][0],
+                    gauss_rects.widths[i][0],
+                    mcmc_rects.heights[i][0],
+                    mcmc_rects.widths[i][0],
+                );
+            }
+        }
+
         for i in 0..arrange_count {
             let remaining_arrange_count = arrange_count - i;
             let duration =
@@ -64,28 +94,17 @@ impl Solver for Solver01 {
             let mcmc_duration = duration * 0.1;
             let first_step_turn = input.rect_cnt() - 15;
 
-            let sampled_rects = gauss_sampler.sample(&mut rng);
-            let rect_std_dev = estimator.rect_std_dev();
-
-            let mut mcmc_sampler = mcmc::MCMCSampler::new(
-                input,
-                observations.clone(),
-                sampled_rects,
-                rect_std_dev,
-                0.0,
-                &mut rng,
-            );
-            let rects = mcmc_sampler.sample(mcmc_duration, &mut rng);
+            let sampled_rects = mcmc_sampler.sample(mcmc_duration, &mut rng);
 
             let ops1 = beam_arranger.arrange(
                 &input,
                 first_step_turn,
-                rects.clone(),
+                sampled_rects.clone(),
                 &mut rng,
                 beam_duration,
             );
 
-            let ops2 = mcts_arranger.arrange(&input, &ops1, rects, &mut rng, mcts_duration);
+            let ops2 = mcts_arranger.arrange(&input, &ops1, sampled_rects, &mut rng, mcts_duration);
 
             let mut ops = ops1;
             ops.extend_from_slice(&ops2);
