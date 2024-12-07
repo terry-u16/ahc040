@@ -51,16 +51,6 @@ impl Solver for Solver01 {
         estimator.dump_estimated(judge.rects());
 
         let mut gauss_sampler = estimator.get_sampler();
-        let sampled_rects = gauss_sampler.sample(&mut rng);
-        let rect_std_dev = estimator.rect_std_dev();
-        let mut mcmc_sampler = mcmc::MCMCSampler::new(
-            input,
-            observations,
-            sampled_rects,
-            rect_std_dev,
-            0.1,
-            &mut rng,
-        );
 
         let mut beam_arranger = MultiBeamArrangerSimd;
         let mut mcts_arranger = MCTSArranger;
@@ -69,10 +59,23 @@ impl Solver for Solver01 {
             let remaining_arrange_count = arrange_count - i;
             let duration =
                 (2.9 - input.since().elapsed().as_secs_f64()) / remaining_arrange_count as f64;
-            let beam_duration = duration * 0.5;
+            let beam_duration = duration * 0.4;
             let mcts_duration = duration * 0.5;
+            let mcmc_duration = duration * 0.1;
             let first_step_turn = input.rect_cnt() - 15;
-            let rects = mcmc_sampler.sample(0.01, &mut rng);
+
+            let sampled_rects = gauss_sampler.sample(&mut rng);
+            let rect_std_dev = estimator.rect_std_dev();
+
+            let mut mcmc_sampler = mcmc::MCMCSampler::new(
+                input,
+                observations.clone(),
+                sampled_rects,
+                rect_std_dev,
+                0.0,
+                &mut rng,
+            );
+            let rects = mcmc_sampler.sample(mcmc_duration, &mut rng);
 
             let ops1 = beam_arranger.arrange(
                 &input,

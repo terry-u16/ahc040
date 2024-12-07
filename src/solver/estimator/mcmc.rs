@@ -53,9 +53,12 @@ impl MCMCSampler {
         let mut widths = vec![];
 
         for (h, w) in izip!(&self.state.rect_h, &self.state.rect_w) {
+            eprint!("({}, {}) ", h.0[0], w.0[0]);
             heights.push(h.0);
             widths.push(w.0);
         }
+
+        eprintln!();
 
         SimdRectSet::new(heights, widths)
     }
@@ -503,6 +506,7 @@ impl Neighbor {
 
 fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> State {
     let since = std::time::Instant::now();
+    let mut all_iter = 0;
 
     loop {
         if since.elapsed().as_secs_f64() >= duration {
@@ -542,7 +546,11 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> State
                 }
             }
         }
+
+        all_iter += 1;
     }
+
+    eprintln!("mcmc_iter: {}", all_iter);
 
     state
 }
