@@ -26,11 +26,12 @@ impl Arranger for MCTSArranger {
         let mut best_score = f32::NEG_INFINITY;
         let mut best_ops = vec![];
 
-        let mut state = unsafe { State::new(input.clone(), rects) };
+        let state = unsafe { State::new(input.clone(), rects) };
         let mut root = Node::new(Action::default());
         let mut score_sum = 0.0;
 
         while since.elapsed().as_secs_f64() < duration_sec {
+            let mut state = state.clone();
             let (score, _) = root.evaluate(&mut state, &mut best_score, &mut best_ops, rng);
             score_sum += score;
         }
@@ -301,12 +302,14 @@ impl State {
         let width_limit = default_width;
         let height_limit = AlignedU16([u16::MAX / 2; AVX2_U16_W]);
 
-        let wh_lower_bound = areas.iter().map(|a| *a as f32).sum::<f32>().sqrt();
+        let wh_lower_bound =
+            2.0 * areas.iter().map(|a| (*a as f32).sqrt()).sum::<f32>() / AVX2_U16_W as f32;
         let score_coef = Self::SCORE_MUL.with(|score_mul| {
             let sum1 = unsafe { horizontal_add_f32(score_mul[0].load()) };
             let sum2 = unsafe { horizontal_add_f32(score_mul[1].load()) };
             sum1 + sum2
         });
+
         let score_coef = 1.0 / (wh_lower_bound * score_coef);
 
         let min_rect_size = unsafe {
