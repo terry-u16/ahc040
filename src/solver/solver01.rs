@@ -6,7 +6,7 @@ use crate::{
     problem::{Input, Judge},
     solver::{
         arranger::{mcts::MCTSArranger, multi_beam_simd::MultiBeamArrangerSimd},
-        estimator::{self, Observation2d, Sampler as _, UpdatableSampler},
+        estimator::{self, mcmc, Observation2d, Sampler as _, UpdatableSampler},
     },
 };
 use rand::SeedableRng;
@@ -39,12 +39,20 @@ impl Solver for Solver01 {
 
             estimator.update(observation_x);
             estimator.update(observation_y);
-            observations.push(Observation2d::new(ops, measure.width(), measure.height()));
+            observations.push(Observation2d::new(
+                ops,
+                measure.width(),
+                measure.height(),
+                false,
+            ));
         }
 
         eprintln!("[Final]");
         estimator.dump_estimated(judge.rects());
+
         let mut gauss_sampler = estimator.get_sampler();
+        mcmc::test(input, &observations, gauss_sampler.sample(&mut rng));
+        
         let mut use_monte_carlo = true;
         let mut monte_carlo_sampler =
             estimator::get_monte_carlo_sampler(input, &mut gauss_sampler, &mut rng, 1024);
@@ -101,7 +109,7 @@ impl Solver for Solver01 {
             let measure = judge.query(&ops);
 
             if use_monte_carlo && i < arrange_count - 1 {
-                let observation = Observation2d::new(ops, measure.width(), measure.height());
+                let observation = Observation2d::new(ops, measure.width(), measure.height(), true);
                 monte_carlo_sampler.update(&observation);
             }
         }

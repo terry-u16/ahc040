@@ -1,4 +1,5 @@
 pub mod gauss;
+pub mod mcmc;
 mod monte_carlo;
 
 use super::simd::SimdRectSet;
@@ -53,14 +54,16 @@ pub(super) struct Observation2d {
     operations: Vec<Op>,
     len_x: u32,
     len_y: u32,
+    is_2d: bool,
 }
 
 impl Observation2d {
-    pub(super) fn new(operations: Vec<Op>, len_x: u32, len_y: u32) -> Self {
+    pub(super) fn new(operations: Vec<Op>, len_x: u32, len_y: u32, is_square: bool) -> Self {
         Self {
             operations,
             len_x,
             len_y,
+            is_2d: is_square,
         }
     }
 }

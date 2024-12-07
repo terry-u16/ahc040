@@ -114,8 +114,8 @@ impl Display for Measure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Dir {
     #[default]
-    Up,
-    Left,
+    Up = 0x00,
+    Left = 0x01,
 }
 
 impl Display for Dir {
