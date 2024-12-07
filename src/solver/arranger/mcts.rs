@@ -50,6 +50,7 @@ struct Node {
     action: Action,
     node_score: AlignedF32,
     node_count: AlignedF32,
+    score_squared_sum: AlignedF32,
     total_count: usize,
     is_expanded: bool,
     valid_mask: AlignedF32,
@@ -64,6 +65,7 @@ impl Node {
             action,
             node_score: AlignedF32::default(),
             node_count: AlignedF32::default(),
+            score_squared_sum: AlignedF32::default(),
             total_count: 0,
             is_expanded: false,
             valid_mask: AlignedF32::default(),
@@ -95,6 +97,7 @@ impl Node {
 
             self.node_score.0[child_index] += score;
             self.node_count.0[child_index] += 1.0;
+            self.score_squared_sum.0[child_index] += score * score;
             (score, updated)
         } else {
             // Bottom-Left法でプレイアウト
@@ -179,9 +182,16 @@ impl Node {
             let score = self.node_score.0[i];
             let total_count = self.total_count as f32;
             let inv_count = 1.0 / count;
+            let total_count_ln = total_count.ln();
 
-            // TODO: UCB1-Tunedに変更
-            let ucb1 = score * inv_count + (2.0 * total_count.ln() * inv_count).sqrt();
+            // UCB1-Tuned
+            let sq_average = self.score_squared_sum.0[i] / count;
+            let average = score / count;
+            let average_sq = average * average;
+            let variance = sq_average - average_sq;
+
+            let var = variance + (2.0 * total_count_ln * inv_count).sqrt();
+            let ucb1 = score * (var.min(0.25) * total_count_ln * inv_count).sqrt();
 
             if best_ucb1.change_max(ucb1) {
                 best_index = i;
