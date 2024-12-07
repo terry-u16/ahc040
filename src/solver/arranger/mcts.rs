@@ -59,7 +59,7 @@ struct Node {
 
 impl Node {
     const EXPANSION_THRESHOLD: usize = 3;
-    const CANDIDATE_COUNT: usize = 2;
+    const CANDIDATE_COUNT: usize = 4;
 
     fn new(action: Action) -> Self {
         Self {
@@ -102,7 +102,7 @@ impl Node {
             (score, updated)
         } else {
             // Bottom-Left法でプレイアウト
-            let action = state.gen_bottom_left(rng.gen_bool(0.5));
+            let action = state.gen_min_topline(rng.gen_bool(0.5));
             action.apply(state);
             self.playout(state, best_score, best_ops, action.op, rng)
         };
@@ -153,7 +153,7 @@ impl Node {
 
             (score, score_updated)
         } else {
-            let action = state.gen_bottom_left(rng.gen_bool(0.5));
+            let action = state.gen_min_topline(rng.gen_bool(0.5));
             action.apply(state);
             self.playout(state, best_score, best_ops, action.op, rng)
         };
@@ -211,17 +211,16 @@ impl Node {
         }
 
         let actions = state.gen_all_actions();
-
         let mut candidates: [Option<Action>; Self::CANDIDATE_COUNT] = [None; Self::CANDIDATE_COUNT];
 
         for action in actions {
-            let mut worst_bottom_left = action.bottom_left_value();
+            let mut worst_bottom_left = action.top_value();
             let mut worst_index = None;
 
             for index in 0..Self::CANDIDATE_COUNT {
                 let bl = match candidates[index] {
-                    Some(ref candidate) => candidate.bottom_left_value(),
-                    None => std::u64::MAX,
+                    Some(ref candidate) => candidate.top_value(),
+                    None => std::u32::MAX,
                 };
 
                 if worst_bottom_left.change_max(bl) {
@@ -422,24 +421,23 @@ impl State {
         actions
     }
 
-    fn gen_bottom_left(&self, rotate: bool) -> Action {
+    fn gen_min_topline(&self, rotate: bool) -> Action {
         // 無効な候補の列挙
         let left_xor = self.get_left_invalid_bases(self.turn);
         let up_xor = self.get_up_invalid_bases(self.turn);
         let left_cands = self.avaliable_base_left & !left_xor;
         let up_cands = self.avaliable_base_up & !up_xor;
 
-        // Bottom-Leftを探す
-        let mut best_score = u64::MAX;
-
+        // Toplineが最も低くなる場所を探す
         // 壁に寄せたUPは常にvalid
         let mut best_action = self.gen_up_action(None, rotate, left_xor, up_xor).unwrap();
+        let mut best_score = best_action.top_value();
 
         for action in BitSetIterU128::new(up_cands)
             .map(|base| self.gen_up_action(Some(base), rotate, left_xor, up_xor))
             .flatten()
         {
-            let score = action.bottom_left_value();
+            let score = action.top_value();
             if best_score.change_min(score) {
                 best_action = action;
             }
@@ -845,6 +843,13 @@ impl Action {
             let x0_sum = horizontal_add_u16(self.placements_x0.load()) as u64;
             let y0_sum = horizontal_add_u16(self.placements_y0.load()) as u64;
             (y0_sum << 32) | x0_sum
+        }
+    }
+
+    fn top_value(&self) -> u32 {
+        unsafe {
+            let y1_sum = horizontal_add_u16(self.placements_y1.load());
+            y1_sum
         }
     }
 
