@@ -1,43 +1,62 @@
-use itertools::izip;
-
-use super::Observation2d;
+use super::{Observation2d, RectStdDev};
 use crate::{
     problem::{
         Dir::{Left, Up},
         Input, Op,
     },
-    solver::simd::{round_u16, AlignedF32, AlignedU16, SimdRectSet},
+    solver::simd::{
+        round_i16, round_u16, AlignedF32, AlignedU16, SimdRectSet, AVX2_F32_W, AVX2_U16_W,
+    },
 };
 use core::arch::x86_64::*;
+use itertools::izip;
+use rand::prelude::*;
+use rand_distr::Normal;
+use rand_pcg::Pcg64Mcg;
 
 pub(crate) struct MCMCSampler {
     observations: Vec<Observation2d>,
     std_dev: f64,
 }
 
-pub(crate) fn test(input: &Input, observations: &[Observation2d], rects: SimdRectSet) {
-    let env = Env::new(&observations, input.rect_cnt(), input.std_dev());
+pub(crate) fn test(
+    input: &Input,
+    observations: &[Observation2d],
+    rects: SimdRectSet,
+    rect_std_dev: RectStdDev,
+) {
+    let env = Env::new(
+        &observations,
+        input.rect_cnt(),
+        input.std_dev(),
+        rect_std_dev,
+    );
     let heights = rects.heights.iter().map(|&h| AlignedU16(h)).collect();
     let widths = rects.widths.iter().map(|&w| AlignedU16(w)).collect();
     let state = State::new(&env, widths, heights);
-    eprintln!(
-        "{:?} {:?}",
-        state.log_likelihood[0].0, state.log_likelihood[1].0
-    );
+    let mut rng = Pcg64Mcg::new(42);
+    mcmc(&env, state, 0.1, &mut rng);
 }
 
 struct Env<'a> {
     observations: &'a [Observation2d],
     rect_cnt: usize,
     std_dev: f64,
+    rect_std_dev: RectStdDev,
 }
 
 impl<'a> Env<'a> {
-    fn new(observations: &'a [Observation2d], rect_cnt: usize, std_dev: f64) -> Self {
+    fn new(
+        observations: &'a [Observation2d],
+        rect_cnt: usize,
+        std_dev: f64,
+        rect_std_dev: RectStdDev,
+    ) -> Self {
         Self {
             observations,
             rect_cnt,
             std_dev,
+            rect_std_dev,
         }
     }
 }
@@ -80,9 +99,7 @@ impl State {
         let mut y0_buf = &mut y0_buf[..env.rect_cnt];
         let mut y1_buf = &mut y1_buf[..env.rect_cnt];
 
-        eprintln!("{}", 1.0 / round_u16(env.std_dev.round() as u32) as f32);
-
-        for (i, observations) in env.observations.iter().enumerate() {
+        for observations in env.observations.iter() {
             let (width, height) = if observations.is_2d {
                 self.pack_2d(
                     &observations.operations,
@@ -100,7 +117,7 @@ impl State {
                     .flat_map(|op| op.base())
                     .next();
 
-                self.pack_2d(
+                self.pack_1d(
                     &observations.operations,
                     &self.rect_w,
                     &self.rect_h,
@@ -108,18 +125,8 @@ impl State {
                     &mut x1_buf,
                     &mut y0_buf,
                     &mut y1_buf,
+                    base,
                 )
-
-                //self.pack_1d(
-                //    &observations.operations,
-                //    &self.rect_w,
-                //    &self.rect_h,
-                //    &mut x0_buf,
-                //    &mut x1_buf,
-                //    &mut y0_buf,
-                //    &mut y1_buf,
-                //    base,
-                //)
             };
 
             // u16 x 16 -> (u32 x 8) x 2 -> (f32 x 8) x 2
@@ -143,9 +150,6 @@ impl State {
             let observed_x = _mm256_set1_ps(round_u16(observations.len_x) as f32);
             let observed_y = _mm256_set1_ps(round_u16(observations.len_y) as f32);
 
-            eprintln!("[Observed x] {:?} {:?}", width_f32_low, observed_x);
-            eprintln!("[Observed y] {:?} {:?}", height_f32_low, observed_y);
-
             let x_diff_low = _mm256_sub_ps(observed_x, width_f32_low);
             let x_diff_high = _mm256_sub_ps(observed_x, width_f32_high);
             let y_diff_low = _mm256_sub_ps(observed_y, height_f32_low);
@@ -161,18 +165,12 @@ impl State {
             log_likelihood_high = _mm256_fmadd_ps(x_diff_high, x_diff_high, log_likelihood_high);
             log_likelihood_low = _mm256_fmadd_ps(y_diff_low, y_diff_low, log_likelihood_low);
             log_likelihood_high = _mm256_fmadd_ps(y_diff_high, y_diff_high, log_likelihood_high);
-
-            eprintln!(
-                "[log likelihood] {} {:?} {:?}",
-                i, log_likelihood_low, log_likelihood_high
-            );
         }
 
         // 対数尤度の-0.5は最後にかければよい
         let neg_inv_2 = _mm256_set1_ps(-0.5);
         let log_likelihood_low = _mm256_mul_ps(log_likelihood_low, neg_inv_2);
         let log_likelihood_high = _mm256_mul_ps(log_likelihood_high, neg_inv_2);
-        eprintln!("{:?} {:?}", log_likelihood_low, log_likelihood_high);
 
         [log_likelihood_low.into(), log_likelihood_high.into()]
     }
@@ -433,4 +431,100 @@ impl State {
         *widths = _mm256_max_epu16(*widths, x1);
         *heights = _mm256_max_epu16(*heights, y1);
     }
+}
+
+struct Neighbor {
+    delta: [i16; AVX2_U16_W],
+    rect_i: usize,
+    is_width: bool,
+}
+
+impl Neighbor {
+    fn new(delta: [i16; AVX2_U16_W], rect_i: usize, is_width: bool) -> Self {
+        Self {
+            delta,
+            rect_i,
+            is_width,
+        }
+    }
+
+    fn gen(env: &Env, state: &State, rng: &mut impl Rng) -> Self {
+        let rect_i = rng.gen_range(0..env.rect_cnt);
+        let is_width = rng.gen_bool(0.5);
+        let std_dev = if is_width {
+            env.rect_std_dev.widths[rect_i]
+        } else {
+            env.rect_std_dev.heights[rect_i]
+        };
+        let current = if is_width {
+            state.rect_w[rect_i]
+        } else {
+            state.rect_h[rect_i]
+        };
+
+        let mut delta = [0; AVX2_U16_W];
+        let dist = Normal::new(0.0, std_dev).unwrap();
+        const LOWER_BOUND: u16 = round_u16(20000);
+        const UPPER_BOUND: u16 = round_u16(100000);
+
+        for i in 0..AVX2_U16_W {
+            delta[i] = loop {
+                let d = dist.sample(rng);
+                let d = round_i16(d as i32) as i16;
+                let new_x = current.0[i].wrapping_add_signed(d);
+
+                if d != 0 && LOWER_BOUND <= new_x && new_x <= UPPER_BOUND {
+                    break d;
+                }
+            }
+        }
+
+        Self::new(delta, rect_i, is_width)
+    }
+}
+
+fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> State {
+    let since = std::time::Instant::now();
+
+    loop {
+        if since.elapsed().as_secs_f64() >= duration {
+            break;
+        }
+
+        // 変形
+        let neighbor = Neighbor::gen(env, &state, rng);
+
+        for i in 0..AVX2_U16_W {
+            if neighbor.is_width {
+                state.rect_w[neighbor.rect_i].0[i] =
+                    state.rect_w[neighbor.rect_i].0[i].wrapping_add_signed(neighbor.delta[i]);
+            } else {
+                state.rect_h[neighbor.rect_i].0[i] =
+                    state.rect_h[neighbor.rect_i].0[i].wrapping_add_signed(neighbor.delta[i]);
+            }
+        }
+
+        // 対数尤度計算
+        let new_log_likelihood = unsafe { state.calc_log_likelihood(env) };
+
+        for i in 0..AVX2_U16_W {
+            let (j, k) = (i / AVX2_F32_W, i % AVX2_F32_W);
+            let prev_log_likelihood = state.log_likelihood[j].0[k];
+
+            if rng.gen_range(0.0..1.0) < (-(prev_log_likelihood - new_log_likelihood[j].0[k])).exp()
+            {
+                state.log_likelihood[j].0[k] = new_log_likelihood[j].0[k];
+            } else {
+                if neighbor.is_width {
+                    state.rect_w[neighbor.rect_i].0[i] =
+                        state.rect_w[neighbor.rect_i].0[i].wrapping_add_signed(-neighbor.delta[i]);
+                } else {
+                    state.rect_h[neighbor.rect_i].0[i] =
+                        state.rect_h[neighbor.rect_i].0[i].wrapping_add_signed(-neighbor.delta[i]);
+                }
+            }
+        }
+    }
+
+    state
 }

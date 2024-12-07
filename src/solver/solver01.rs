@@ -49,10 +49,16 @@ impl Solver for Solver01 {
 
         eprintln!("[Final]");
         estimator.dump_estimated(judge.rects());
+        let rect_std_dev = estimator.rect_std_dev();
 
         let mut gauss_sampler = estimator.get_sampler();
-        mcmc::test(input, &observations, gauss_sampler.sample(&mut rng));
-        
+        mcmc::test(
+            input,
+            &observations,
+            gauss_sampler.sample(&mut rng),
+            rect_std_dev,
+        );
+
         let mut use_monte_carlo = true;
         let mut monte_carlo_sampler =
             estimator::get_monte_carlo_sampler(input, &mut gauss_sampler, &mut rng, 1024);

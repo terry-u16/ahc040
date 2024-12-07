@@ -67,3 +67,15 @@ impl Observation2d {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub(super) struct RectStdDev {
+    widths: Vec<f64>,
+    heights: Vec<f64>,
+}
+
+impl RectStdDev {
+    fn new(widths: Vec<f64>, heights: Vec<f64>) -> Self {
+        Self { widths, heights }
+    }
+}

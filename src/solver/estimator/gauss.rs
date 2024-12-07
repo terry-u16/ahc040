@@ -1,6 +1,6 @@
 mod annealing;
 
-use super::Sampler;
+use super::{RectStdDev, Sampler};
 use crate::{
     problem::{Input, Op, Rect},
     solver::simd::{round_u16, SimdRectSet, AVX2_U16_W},
@@ -129,6 +129,20 @@ impl GaussEstimator {
 
     pub fn variance_width(&self) -> Vec<f64> {
         self.variance_diag()[self.rect_cnt..].to_vec()
+    }
+
+    pub fn rect_std_dev(&self) -> RectStdDev {
+        let std_dev_h = self
+            .variance_height()
+            .into_iter()
+            .map(|v| v.sqrt())
+            .collect();
+        let std_dev_w = self
+            .variance_width()
+            .into_iter()
+            .map(|v| v.sqrt())
+            .collect();
+        RectStdDev::new(std_dev_w, std_dev_h)
     }
 }
 

@@ -10,6 +10,10 @@ pub(super) const fn round_u16(x: u32) -> u16 {
     ((x + (1 << 5)) >> 6) as u16
 }
 
+pub(super) const fn round_i16(x: i32) -> i16 {
+    ((x + (1 << 5)) >> 6) as i16
+}
+
 #[target_feature(enable = "avx,avx2")]
 pub(super) unsafe fn horizontal_add_u16(x: __m256i) -> u32 {
     unsafe {
