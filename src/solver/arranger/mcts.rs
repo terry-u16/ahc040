@@ -11,22 +11,25 @@ use std::{arch::x86_64::*, u64};
 
 use super::Arranger;
 
-pub(super) struct MCTSArranger;
+pub struct MCTSArranger;
 
 impl Arranger for MCTSArranger {
     fn arrange(
         &mut self,
         input: &Input,
-        sampler: &mut impl super::Sampler,
+        start_ops: &[Op],
+        end_turn: usize,
+        rects: SimdRectSet,
         rng: &mut impl Rng,
         duration_sec: f64,
     ) -> Vec<Op> {
         let since = std::time::Instant::now();
-        let rects = sampler.sample(rng);
         let mut best_score = f32::NEG_INFINITY;
         let mut best_ops = vec![];
 
-        let state = unsafe { State::new(input.clone(), rects) };
+        let mut state = unsafe { State::new(input.clone(), rects) };
+        state.apply_init_ops(start_ops);
+
         let mut root = Node::new(Action::default());
         let mut score_sum = 0.0;
 
@@ -57,7 +60,7 @@ struct Node {
 }
 
 impl Node {
-    const EXPANSION_THRESHOLD: usize = 2;
+    const EXPANSION_THRESHOLD: usize = 3;
 
     fn new(action: Action) -> Self {
         Self {
@@ -119,7 +122,7 @@ impl Node {
         best_ops: &mut Vec<Op>,
     ) -> (f32, bool) {
         let score = unsafe { state.calc_score() };
-        eprintln!("{}", score);
+
         let score_updated = best_score.change_max(score);
 
         // スコアが更新されたら手順を更新
@@ -345,6 +348,25 @@ impl State {
             min_rect_size,
             rect_count: input.rect_cnt(),
             score_coef,
+        }
+    }
+
+    fn apply_init_ops(&mut self, ops: &[Op]) {
+        for &op in ops {
+            // 無効な候補の列挙
+            let left_xor = self.get_left_invalid_bases(self.turn);
+            let up_xor = self.get_up_invalid_bases(self.turn);
+
+            // 生成
+            let rotates = op.rotate();
+            let base = op.base();
+            let action = match op.dir() {
+                Dir::Left => self.gen_left_action(base, rotates, left_xor, up_xor),
+                Dir::Up => self.gen_up_action(base, rotates, left_xor, up_xor),
+            }
+            .unwrap();
+
+            action.apply(self);
         }
     }
 

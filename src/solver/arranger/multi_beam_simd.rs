@@ -13,19 +13,20 @@ use std::arch::x86_64::*;
 /// 多変量正規分布からN個の長方形を16インスタンス生成し、それぞれについて並行に操作を行うビームサーチ。
 /// 考え方は粒子フィルタなどと同じで、非線形性を考慮するために多数のインスタンスでシミュレートする。
 /// 内部的にAVX2を使用して高速化している。
-pub(super) struct MultiBeamArrangerSimd;
+pub struct MultiBeamArrangerSimd;
 
 impl Arranger for MultiBeamArrangerSimd {
     fn arrange(
         &mut self,
         input: &Input,
-        sampler: &mut impl Sampler,
+        start_ops: &[Op],
+        end_turn: usize,
+        rects: SimdRectSet,
         rng: &mut impl Rng,
         duration_sec: f64,
     ) -> Vec<Op> {
         let since = std::time::Instant::now();
 
-        let rects = sampler.sample(rng);
         let large_state = unsafe { LargeState::new(input.clone(), rects, rng) };
         let small_state = SmallState::default();
         let act_gen = ActGen::new();
@@ -46,7 +47,7 @@ impl Arranger for MultiBeamArrangerSimd {
         let (ops, _) = beam.run(
             large_state,
             small_state,
-            input.rect_cnt(),
+            end_turn,
             beam_width_suggester,
             deduplicator,
         );

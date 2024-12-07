@@ -1,7 +1,7 @@
-mod mcts;
-mod multi_beam_simd;
+pub(super) mod mcts;
+pub(super) mod multi_beam_simd;
 
-use super::estimator::Sampler;
+use super::{estimator::Sampler, simd::SimdRectSet};
 use crate::problem::{Input, Op};
 use rand::Rng;
 
@@ -9,13 +9,10 @@ pub(super) trait Arranger {
     fn arrange(
         &mut self,
         input: &Input,
-        sampler: &mut impl Sampler,
+        start_ops: &[Op],
+        end_turn: usize,
+        rects: SimdRectSet,
         rng: &mut impl Rng,
         duration_sec: f64,
     ) -> Vec<Op>;
-}
-
-pub(super) fn get_arranger() -> impl Arranger {
-    //multi_beam_simd::MultiBeamArrangerSimd
-    mcts::MCTSArranger
 }

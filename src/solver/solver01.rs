@@ -5,8 +5,8 @@ use super::{
 use crate::{
     problem::{Input, Judge},
     solver::{
-        arranger::{self, Arranger},
-        estimator::{self, Observation2d, UpdatableSampler},
+        arranger::{self, mcts::MCTSArranger, multi_beam_simd::MultiBeamArrangerSimd, Arranger},
+        estimator::{self, Observation2d, Sampler as _, UpdatableSampler},
     },
 };
 use rand::SeedableRng;
@@ -59,18 +59,60 @@ impl Solver for Solver01 {
             monte_carlo_sampler.update(&observation);
         }
 
-        let mut arranger = arranger::get_arranger();
+        let mut beam_arranger = MultiBeamArrangerSimd;
+        let mut mcts_arranger = MCTSArranger;
 
         for i in 0..arrange_count {
             let remaining_arrange_count = arrange_count - i;
             let duration =
                 (2.9 - input.since().elapsed().as_secs_f64()) / remaining_arrange_count as f64;
+            let beam_duration = duration * 0.5;
+            let mcts_duration = duration * 0.5;
+            let first_step_turn = input.rect_cnt() - 12;
+            let rects = gauss_sampler.sample(&mut rng);
 
-            let ops = if use_monte_carlo {
-                arranger.arrange(&input, &mut monte_carlo_sampler, &mut rng, duration)
+            let ops1 = if use_monte_carlo {
+                beam_arranger.arrange(
+                    &input,
+                    &[],
+                    first_step_turn,
+                    rects.clone(),
+                    &mut rng,
+                    beam_duration,
+                )
             } else {
-                arranger.arrange(&input, &mut gauss_sampler, &mut rng, duration)
+                beam_arranger.arrange(
+                    &input,
+                    &[],
+                    first_step_turn,
+                    rects.clone(),
+                    &mut rng,
+                    beam_duration,
+                )
             };
+
+            let ops2 = if use_monte_carlo {
+                mcts_arranger.arrange(
+                    &input,
+                    &ops1,
+                    input.rect_cnt(),
+                    rects,
+                    &mut rng,
+                    mcts_duration,
+                )
+            } else {
+                mcts_arranger.arrange(
+                    &input,
+                    &ops1,
+                    input.rect_cnt(),
+                    rects,
+                    &mut rng,
+                    mcts_duration,
+                )
+            };
+
+            let mut ops = ops1;
+            ops.extend_from_slice(&ops2);
 
             let measure = judge.query(&ops);
 
