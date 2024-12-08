@@ -400,13 +400,13 @@ impl ActGen {
 
         let x1 = _mm256_add_epi16(x0, rect_w);
 
-        // リミット超えたらNG
+        // 1つでもリミット超えたらNG
         let width_limit = _mm256_cmpgt_epi16(x1, width_limit.load());
         let height_limit = _mm256_cmpgt_epi16(y1, height_limit.load());
         let over_limit = _mm256_or_si256(width_limit, height_limit);
-        let over_limit = horizontal_or_u16(over_limit);
+        let over_limit = _mm256_movemask_epi8(over_limit);
 
-        if over_limit > 0 {
+        if over_limit != 0 {
             return None;
         }
 
@@ -438,9 +438,9 @@ impl ActGen {
         };
 
         // ピッタリくっついていないものがあったらNG
-        let is_touching = horizontal_and_u16(is_touching);
+        let is_touching = _mm256_movemask_epi8(is_touching);
 
-        if is_touching == 0 {
+        if is_touching != -1 {
             return None;
         }
 
@@ -542,7 +542,7 @@ impl ActGen {
                 // invalidなものが1つでもあったらNG
                 let invalid = _mm256_or_si256(invalid_base, invalid_width_limit);
                 let invalid = _mm256_and_si256(pred_y, invalid);
-                let is_invalid = horizontal_or_u16(invalid) > 0;
+                let is_invalid = _mm256_movemask_epi8(invalid) != 0;
                 invalid_flag |= (is_invalid as u128) << rect_i;
             }
 
