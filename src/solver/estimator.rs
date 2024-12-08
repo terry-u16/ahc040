@@ -36,7 +36,7 @@ pub(super) trait Sampler {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct Observation2d {
+pub(crate) struct Observation2d {
     operations: Vec<Op>,
     len_x: u32,
     len_y: u32,
@@ -55,7 +55,7 @@ impl Observation2d {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct RectStdDev {
+pub(crate) struct RectStdDev {
     widths: Vec<f64>,
     heights: Vec<f64>,
 }

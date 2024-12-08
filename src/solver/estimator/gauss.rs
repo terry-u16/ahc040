@@ -131,7 +131,7 @@ impl GaussEstimator {
         self.variance_diag()[self.rect_cnt..].to_vec()
     }
 
-    pub fn rect_std_dev(&self) -> RectStdDev {
+    pub(crate) fn rect_std_dev(&self) -> RectStdDev {
         let std_dev_h = self
             .variance_height()
             .into_iter()
