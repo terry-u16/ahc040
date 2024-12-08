@@ -4,9 +4,7 @@ use crate::{
         Dir::{Left, Up},
         Input, Op,
     },
-    solver::simd::{
-        round_i16, round_u16, AlignedF32, AlignedU16, SimdRectSet, AVX2_F32_W, AVX2_U16_W,
-    },
+    solver::simd::{round_u16, AlignedF32, AlignedU16, SimdRectSet, AVX2_F32_W, AVX2_U16_W},
 };
 use core::arch::x86_64::*;
 use itertools::{izip, Itertools};
@@ -191,10 +189,10 @@ impl State {
         let mut y0_buf = &mut y0_buf[..env.rect_cnt];
         let mut y1_buf = &mut y1_buf[..env.rect_cnt];
 
-        for observations in env.observations.iter() {
-            let (width, height) = if observations.is_2d {
+        for observation in env.observations.iter() {
+            let (width, height) = if observation.is_2d {
                 self.pack_2d(
-                    &observations.operations,
+                    &observation.operations,
                     &self.rect_w,
                     &self.rect_h,
                     &mut x0_buf,
@@ -203,14 +201,14 @@ impl State {
                     &mut y1_buf,
                 )
             } else {
-                let base = observations
+                let base = observation
                     .operations
                     .iter()
                     .flat_map(|op| op.base())
                     .next();
 
                 self.pack_1d(
-                    &observations.operations,
+                    &observation.operations,
                     &self.rect_w,
                     &self.rect_h,
                     &mut x0_buf,
@@ -239,8 +237,8 @@ impl State {
             let height_f32_low = _mm256_cvtepi32_ps(height_u32_low);
             let height_f32_high = _mm256_cvtepi32_ps(height_u32_high);
 
-            let observed_x = _mm256_set1_ps(round_u16(observations.len_x) as f32);
-            let observed_y = _mm256_set1_ps(round_u16(observations.len_y) as f32);
+            let observed_x = _mm256_set1_ps(round_u16(observation.len_x) as f32);
+            let observed_y = _mm256_set1_ps(round_u16(observation.len_y) as f32);
 
             let x_diff_low = _mm256_sub_ps(observed_x, width_f32_low);
             let x_diff_high = _mm256_sub_ps(observed_x, width_f32_high);
@@ -550,8 +548,8 @@ impl Neighbor {
         };
 
         let mut delta = [0; AVX2_U16_W];
-        const LOWER_BOUND: u16 = round_u16(20000);
-        const UPPER_BOUND: u16 = round_u16(100000);
+        const LOWER_BOUND: u16 = round_u16(Input::MIN_RECT_SIZE);
+        const UPPER_BOUND: u16 = round_u16(Input::MAX_RECT_SIZE);
 
         for i in 0..AVX2_U16_W {
             let len = current.0[i] as f64;

@@ -193,8 +193,10 @@ impl Sampler for GaussSampler<'_> {
             let values = &self.cholesky.l() * DVector::from_vec(values) + &self.estimator.mean;
 
             for rect_i in 0..self.estimator.rect_cnt {
-                let height = (values[rect_i].round() as u32).clamp(20000, 100000);
-                let width = (values[rect_i + self.estimator.rect_cnt] as u32).clamp(20000, 100000);
+                let height = (values[rect_i].round() as u32)
+                    .clamp(Input::MIN_RECT_SIZE, Input::MAX_RECT_SIZE);
+                let width = (values[rect_i + self.estimator.rect_cnt] as u32)
+                    .clamp(Input::MIN_RECT_SIZE, Input::MAX_RECT_SIZE);
                 heights[rect_i][simd_i] = round_u16(height);
                 widths[rect_i][simd_i] = round_u16(width);
             }
