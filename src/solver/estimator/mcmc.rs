@@ -659,7 +659,8 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> Vec<S
     let mut all_iter = 0;
     let mut accepted = 0;
     let mut rejected = 0;
-    let mut all_states = vec![state.clone()];
+    let mut all_states = vec![];
+    const SAMPLE_INTERVAL: usize = 20;
 
     loop {
         if since.elapsed().as_secs_f64() >= duration {
@@ -703,11 +704,15 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> Vec<S
         }
 
         all_iter += 1;
-        all_states.push(state.clone());
+
+        if all_iter % SAMPLE_INTERVAL == 0 {
+            all_states.push(state.clone());
+        }
     }
 
     eprintln!("mcmc_iter: {}", all_iter);
     eprintln!("mcmc accepted: {} / {}", accepted, accepted + rejected);
 
+    all_states.push(state);
     all_states
 }

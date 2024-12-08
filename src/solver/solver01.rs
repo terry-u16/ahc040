@@ -3,7 +3,7 @@ use super::{
     Solver,
 };
 use crate::{
-    problem::{Input, Judge},
+    problem::{params::Params, Input, Judge},
     solver::{
         arranger::{mcts::MCTSArranger, multi_beam_simd::MultiBeamArrangerSimd},
         estimator::{self, mcmc, Observation2d, Sampler as _},
@@ -27,11 +27,12 @@ impl Solver for Solver01 {
         eprintln!("[Init]");
         estimator.dump_estimated(judge.rects());
 
-        let arrange_count = (input.query_cnt() / 5).clamp(5, 10);
-        let duration = 0.3 / (input.query_cnt() - arrange_count) as f64;
+        let arrange_trial_count = Params::get().arrange_count;
+        let duration = Params::get().query_annealing_duration_sec
+            / (input.query_cnt() - arrange_trial_count) as f64;
         let mut observations = vec![];
 
-        for _ in 0..input.query_cnt() - arrange_count {
+        for _ in 0..input.query_cnt() - arrange_trial_count {
             let (ops, edges_v, edges_h) = estimator::get_placements(&estimator, duration, &mut rng);
             let measure = judge.query(&ops);
             let observation_x = Observation1d::new(measure.width(), edges_h);
@@ -63,22 +64,24 @@ impl Solver for Solver01 {
             observations.clone(),
             gauss_rects.clone(),
             rect_std_dev,
-            0.1,
+            Params::get().mcmc_init_duration_sec,
             &mut rng,
             &mut judge,
         );
 
-        for i in 0..arrange_count {
-            let remaining_arrange_count = arrange_count - i;
+        for i in 0..arrange_trial_count {
+            let remaining_arrange_count = arrange_trial_count - i;
             let duration =
                 (2.95 - input.since().elapsed().as_secs_f64()) / remaining_arrange_count as f64;
-            let beam_duration = duration * 0.4;
-            let mcts_duration = duration * 0.5;
-            let mcmc_duration = duration * 0.1;
-            let first_step_turn = input.rect_cnt() - 15;
+
+            let search_ratio = 1.0 - Params::get().mcmc_duration_ratio;
+            let beam_duration = duration * search_ratio * Params::get().beam_mcts_duration_ratio;
+            let mcts_duration =
+                duration * search_ratio * (1.0 - Params::get().beam_mcts_duration_ratio);
+            let mcmc_duration = duration * Params::get().mcmc_duration_ratio;
+            let first_step_turn = input.rect_cnt() - Params::get().mcts_turn;
 
             let sampled_rects = mcmc_sampler.sample(mcmc_duration, &mut rng);
-            //let sampled_rects = gauss_sampler.sample(&mut rng);
 
             let ops1 = beam_arranger.arrange(
                 &input,
@@ -94,7 +97,7 @@ impl Solver for Solver01 {
 
             let measure = judge.query(&ops);
 
-            if i < arrange_count - 1 {
+            if i < arrange_trial_count - 1 {
                 let observation = Observation2d::new(ops, measure.width(), measure.height(), true);
                 mcmc_sampler.update(observation);
             }

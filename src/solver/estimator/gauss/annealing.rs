@@ -111,8 +111,6 @@ impl State {
         let mut max_x_i = !0;
         let mut max_y_i = !0;
 
-        const MAX_BOX_SIZE: u32 = 100000;
-
         for (i, dir) in directions.iter().enumerate() {
             let &Some((dir, rotate)) = dir else {
                 continue;
@@ -131,7 +129,7 @@ impl State {
                     let x0 = 0;
                     let x1 = x0 + w;
 
-                    if y >= MAX_BOX_SIZE + pivot_y {
+                    if y >= Input::MAX_RECT_SIZE + pivot_y {
                         // 絶対に他の箱と干渉しない
 
                         // pivotの場合は水平方向のrootとなる
@@ -197,7 +195,7 @@ impl State {
                         max_y_i = i;
                     }
 
-                    if pivot_y < y0 && y0 < MAX_BOX_SIZE + pivot_y {
+                    if pivot_y < y0 && y0 < Input::MAX_RECT_SIZE + pivot_y {
                         let pl = Placement::new(x0, x1, y0, y1);
                         placements_h.push((pl, i, vec_i));
                     }
@@ -214,7 +212,7 @@ impl State {
                     let y0 = pivot_y;
                     let y1 = y0 + h;
 
-                    if x >= MAX_BOX_SIZE {
+                    if x >= Input::MAX_RECT_SIZE {
                         // 絶対に他の箱と干渉しない
                         x += w;
                         parents_h[i] = last_h;
@@ -265,7 +263,7 @@ impl State {
                         max_y_i = i;
                     }
 
-                    if 0 < x0 && x0 < MAX_BOX_SIZE {
+                    if 0 < x0 && x0 < Input::MAX_RECT_SIZE {
                         let pl = Placement::new(x0, x1, y0, y1);
                         placements_v.push((pl, i, vec_i));
                     }

@@ -1,8 +1,8 @@
-use itertools::izip;
+use itertools::{izip, Itertools};
 use rand::Rng;
 
 use crate::{
-    problem::{Dir, Input, Op},
+    problem::{params::Params, Dir, Input, Op},
     solver::simd::*,
     util::{BitSetIterU128, ChangeMinMax},
 };
@@ -48,29 +48,33 @@ impl MCTSArranger {
 #[derive(Debug, Clone)]
 struct Node {
     action: Action,
-    node_score: [f32; Self::CANDIDATE_COUNT],
-    node_count: [f32; Self::CANDIDATE_COUNT],
-    score_squared_sum: [f32; Self::CANDIDATE_COUNT],
+    node_score: Vec<f32>,
+    node_count: Vec<f32>,
+    score_squared_sum: Vec<f32>,
     total_count: usize,
     is_expanded: bool,
-    is_valid: [bool; Self::CANDIDATE_COUNT],
-    candidates: [Option<Box<Node>>; Self::CANDIDATE_COUNT],
+    is_valid: Vec<bool>,
+    candidates: Vec<Option<Box<Node>>>,
 }
 
 impl Node {
-    const EXPANSION_THRESHOLD: usize = 3;
-    const CANDIDATE_COUNT: usize = 4;
-
     fn new(action: Action) -> Self {
+        let candidates_count = Params::get().mcts_candidates_count;
+        let node_score = vec![0.0; candidates_count];
+        let node_count = vec![0.0; candidates_count];
+        let score_squared_sum = vec![0.0; candidates_count];
+        let is_valid = vec![false; candidates_count];
+        let candidates = vec![None; candidates_count];
+
         Self {
             action,
-            node_score: Default::default(),
-            node_count: Default::default(),
-            score_squared_sum: Default::default(),
+            node_score,
+            node_count,
+            score_squared_sum,
             total_count: 0,
             is_expanded: false,
-            is_valid: Default::default(),
-            candidates: std::array::from_fn(|_| None),
+            is_valid,
+            candidates,
         }
     }
 
@@ -82,7 +86,7 @@ impl Node {
         rng: &mut impl Rng,
     ) -> (f32, bool) {
         // stateがactionによって変更されないうちに展開を行う（帰りがけにやるとダメ）
-        if self.total_count == Self::EXPANSION_THRESHOLD {
+        if self.total_count == Params::get().mcts_expansion_threshold {
             self.expand(state);
         }
 
@@ -170,7 +174,7 @@ impl Node {
         let mut best_ucb1 = f32::NEG_INFINITY;
         let mut best_index = 0;
 
-        for i in 0..Self::CANDIDATE_COUNT {
+        for i in 0..Params::get().mcts_candidates_count {
             if !self.is_valid[i] {
                 continue;
             }
@@ -193,7 +197,9 @@ impl Node {
 
             // TODO: パラメータ調整
             let var = variance + (2.0 * total_count_ln * inv_count).sqrt();
-            let ucb1 = average_score + (var.min(0.25) * total_count_ln * inv_count).sqrt();
+            let ucb1 = average_score
+                + Params::get().ucb1_tuned_coef
+                    * (var.min(0.25) * total_count_ln * inv_count).sqrt();
 
             if best_ucb1.change_max(ucb1) {
                 best_index = i;
@@ -211,13 +217,13 @@ impl Node {
         }
 
         let actions = state.gen_all_actions();
-        let mut candidates: [Option<Action>; Self::CANDIDATE_COUNT] = [None; Self::CANDIDATE_COUNT];
+        let mut candidates: Vec<Option<Action>> = vec![None; Params::get().mcts_candidates_count];
 
         for action in actions {
             let mut worst_bottom_left = action.top_value();
             let mut worst_index = None;
 
-            for index in 0..Self::CANDIDATE_COUNT {
+            for index in 0..Params::get().mcts_candidates_count {
                 let bl = match candidates[index] {
                     Some(ref candidate) => candidate.top_value(),
                     None => std::u32::MAX,
@@ -234,7 +240,10 @@ impl Node {
             }
         }
 
-        self.candidates = candidates.map(|action| action.map(|action| Box::new(Node::new(action))));
+        self.candidates = candidates
+            .into_iter()
+            .map(|action| action.map(|action| Box::new(Node::new(action))))
+            .collect_vec();
     }
 }
 
@@ -262,11 +271,11 @@ impl State {
     // スコア係数
     thread_local!(static SCORE_MUL: [AlignedF32; 2] = {
         // TODO: パラメータ調整
-        const SCORE_MUL: f32 = 0.9;
+        let score_mul = Params::get().parallel_score_mul;
         [
-            AlignedF32(std::array::from_fn(|i| SCORE_MUL.powi(i as i32))),
+            AlignedF32(std::array::from_fn(|i| score_mul.powi(i as i32))),
             AlignedF32(std::array::from_fn(|i| {
-                SCORE_MUL.powi((i + AVX2_F32_W) as i32)
+                score_mul.powi((i + AVX2_F32_W) as i32)
             })),
         ]
     });
@@ -296,7 +305,8 @@ impl State {
 
         // 10%余裕を持たせる
         // TODO: パラメータ調整
-        let default_width = AlignedU16(areas.map(|a| (a as f64 * 1.1).sqrt() as u16));
+        let default_width =
+            AlignedU16(areas.map(|a| (a as f64 * Params::get().width_buf).sqrt() as u16));
 
         let width_limit = default_width;
         let height_limit = AlignedU16([u16::MAX / 2; AVX2_U16_W]);

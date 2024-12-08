@@ -1,6 +1,6 @@
 use crate::{
     beam::{self, BayesianBeamWidthSuggester},
-    problem::{Dir, Input, Op},
+    problem::{params::Params, Dir, Input, Op},
     solver::simd::*,
     util::BitSetIterU128,
 };
@@ -27,12 +27,12 @@ impl MultiBeamArrangerSimd {
         let small_state = SmallState::default();
         let act_gen = ActGen::new();
 
-        let remaining_time = (duration_sec - since.elapsed().as_secs_f64()).max(0.001);
+        let remaining_time = (duration_sec - since.elapsed().as_secs_f64()).max(0.01);
         let mut beam = beam::BeamSearch::new(act_gen);
         let standard_beam_width = 100_000 / (input.rect_cnt() as usize);
         let beam_width_suggester = BayesianBeamWidthSuggester::new(
             input.rect_cnt(),
-            8,
+            7,
             remaining_time,
             standard_beam_width,
             1,
@@ -96,7 +96,8 @@ impl LargeState {
 
         // 10%余裕を持たせる
         // TODO: パラメータ調整
-        let default_width = AlignedU16(areas.map(|a| (a as f64 * 1.1).sqrt() as u16));
+        let default_width =
+            AlignedU16(areas.map(|a| (a as f64 * Params::get().width_buf).sqrt() as u16));
 
         let width_limit = default_width;
         let height_limit = AlignedU16([u16::MAX / 2; AVX2_U16_W]);
@@ -200,11 +201,11 @@ impl SmallState {
         // （期待値を最大化するよりは上振れを狙いたいため）
         thread_local!(static SCORE_MUL: [AlignedF32; 2] = {
             // TODO: パラメータ調整
-            const SCORE_MUL: f32 = 0.9;
+            let score_mul = Params::get().parallel_score_mul;
             [
-                AlignedF32(std::array::from_fn(|i| SCORE_MUL.powi(i as i32))),
+                AlignedF32(std::array::from_fn(|i| score_mul.powi(i as i32))),
                 AlignedF32(std::array::from_fn(|i| {
-                    SCORE_MUL.powi((i + AVX2_F32_W) as i32)
+                    score_mul.powi((i + AVX2_F32_W) as i32)
                 })),
             ]
         });
