@@ -71,7 +71,7 @@ impl Solver for Solver01 {
         for i in 0..arrange_count {
             let remaining_arrange_count = arrange_count - i;
             let duration =
-                (2.9 - input.since().elapsed().as_secs_f64()) / remaining_arrange_count as f64;
+                (2.95 - input.since().elapsed().as_secs_f64()) / remaining_arrange_count as f64;
             let beam_duration = duration * 0.4;
             let mcts_duration = duration * 0.5;
             let mcmc_duration = duration * 0.1;
