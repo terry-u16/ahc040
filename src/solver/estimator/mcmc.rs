@@ -2,10 +2,11 @@ use super::{Observation2d, RectStdDev};
 use crate::{
     problem::{
         Dir::{Left, Up},
-        Input, Op,
+        Input, Judge, Op, Rect,
     },
     solver::simd::{
-        round_i16, round_u16, AlignedF32, AlignedU16, SimdRectSet, AVX2_F32_W, AVX2_U16_W,
+        expand_u16, round_i16, round_u16, AlignedF32, AlignedU16, SimdRectSet, AVX2_F32_W,
+        AVX2_U16_W,
     },
 };
 use core::arch::x86_64::*;
@@ -26,6 +27,7 @@ impl MCMCSampler {
         rect_std_dev: RectStdDev,
         init_duration: f64,
         rng: &mut impl Rng,
+        judge: &impl Judge,
     ) -> Self {
         let env = Env::new(
             input,
@@ -37,9 +39,15 @@ impl MCMCSampler {
         let heights = rects.heights.iter().map(|&h| AlignedU16(h)).collect();
         let widths = rects.widths.iter().map(|&w| AlignedU16(w)).collect();
         let state = State::new(&env, widths, heights);
-        let state = mcmc(&env, state, init_duration, rng);
+        let mut states = mcmc(&env, state, init_duration, rng);
+        unsafe {
+            Self::dump_estimated(&states, judge.rects(), input.rect_cnt());
+        }
 
-        Self { env, state }
+        Self {
+            env,
+            state: states.pop().unwrap(),
+        }
     }
 
     pub(crate) fn update(&mut self, observation: Observation2d) {
@@ -48,7 +56,9 @@ impl MCMCSampler {
     }
 
     pub(crate) fn sample(&mut self, duration: f64, rng: &mut impl Rng) -> SimdRectSet {
-        self.state = mcmc(&self.env, self.state.clone(), duration, rng);
+        self.state = mcmc(&self.env, self.state.clone(), duration, rng)
+            .pop()
+            .unwrap();
 
         let mut heights = vec![];
         let mut widths = vec![];
@@ -59,6 +69,75 @@ impl MCMCSampler {
         }
 
         SimdRectSet::new(heights, widths)
+    }
+
+    unsafe fn dump_estimated(states: &[State], actual_rects: Option<&[Rect]>, rect_cnt: usize) {
+        let Some(rects) = actual_rects else { return };
+        let mut sum_w = vec![0; rect_cnt];
+        let mut sum_h = vec![0; rect_cnt];
+        let count = states.len();
+
+        for state in states {
+            for (i, (w, h)) in izip!(&state.rect_w, &state.rect_h).enumerate() {
+                for j in 0..AVX2_U16_W {
+                    sum_w[i] += expand_u16(w.0[j]) as u64;
+                    sum_h[i] += expand_u16(h.0[j]) as u64;
+                }
+            }
+        }
+
+        let mean_h = sum_h
+            .iter()
+            .map(|&s| s as f64 / (count * AVX2_U16_W as usize) as f64)
+            .collect_vec();
+        let mean_w = sum_w
+            .iter()
+            .map(|&s| s as f64 / (count * AVX2_U16_W as usize) as f64)
+            .collect_vec();
+
+        let mut sum_var_w = vec![0.0; rect_cnt];
+        let mut sum_var_h = vec![0.0; rect_cnt];
+
+        for state in states {
+            for (i, (w, h)) in izip!(&state.rect_w, &state.rect_h).enumerate() {
+                for j in 0..AVX2_U16_W {
+                    sum_var_w[i] += (expand_u16(w.0[j]) as f64 - mean_w[i]).powi(2);
+                    sum_var_h[i] += (expand_u16(h.0[j]) as f64 - mean_h[i]).powi(2);
+                }
+            }
+        }
+
+        let var_w = sum_var_w
+            .iter()
+            .map(|&s| s / (count * AVX2_U16_W as usize) as f64)
+            .collect_vec();
+        let var_h = sum_var_h
+            .iter()
+            .map(|&s| s / (count * AVX2_U16_W as usize) as f64)
+            .collect_vec();
+
+        let std_dev_w = var_w.iter().map(|&v| v.sqrt()).collect_vec();
+        let std_dev_h = var_h.iter().map(|&v| v.sqrt()).collect_vec();
+
+        eprintln!("[MCMC]");
+
+        for i in 0..rect_cnt {
+            eprint!(
+                "{:>02} {:>6.0} ± {:>5.0} / {:>6.0} ± {:>5.0}",
+                i, mean_h[i], std_dev_h[i], mean_w[i], std_dev_w[i]
+            );
+
+            let rect = rects[i];
+            let sigma_h = (rect.height() as f64 - mean_h[i] as f64) / std_dev_h[i];
+            let sigma_w = (rect.width() as f64 - mean_w[i] as f64) / std_dev_w[i];
+            eprintln!(
+                " (actual: {:>6.0} ({:+>5.2}σ) / {:>6.0} ({:+>5.2}σ))",
+                rect.height(),
+                sigma_h,
+                rect.width(),
+                sigma_w
+            );
+        }
     }
 }
 
@@ -570,11 +649,12 @@ impl Neighbor {
     }
 }
 
-fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> State {
+fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> Vec<State> {
     let since = std::time::Instant::now();
     let mut all_iter = 0;
     let mut accepted = 0;
     let mut rejected = 0;
+    let mut all_states = vec![state.clone()];
 
     loop {
         if since.elapsed().as_secs_f64() >= duration {
@@ -618,10 +698,11 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> State
         }
 
         all_iter += 1;
+        all_states.push(state.clone());
     }
 
     eprintln!("mcmc_iter: {}", all_iter);
-    eprintln!("accepted: {} / {}", accepted, accepted + rejected);
+    eprintln!("mcmc accepted: {} / {}", accepted, accepted + rejected);
 
-    state
+    all_states
 }

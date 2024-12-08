@@ -567,12 +567,7 @@ impl beam::ActGen<SmallState> for ActGen {
 
         for rotate in rotates {
             // Up
-            next_states.extend(self.gen_up_cand(
-                &large_state,
-                None,
-                rotate,
-                invalid_bases_up,
-            ));
+            next_states.extend(self.gen_up_cand(&large_state, None, rotate, invalid_bases_up));
 
             for i in BitSetIterU128::new(avaliable_bases_up) {
                 next_states.extend(self.gen_up_cand(

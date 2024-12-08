@@ -7,7 +7,6 @@ use crate::{
     solver::{
         arranger::{mcts::MCTSArranger, multi_beam_simd::MultiBeamArrangerSimd},
         estimator::{self, mcmc, Observation2d, Sampler as _},
-        simd::round_u16,
     },
 };
 use rand::SeedableRng;
@@ -66,24 +65,8 @@ impl Solver for Solver01 {
             rect_std_dev,
             0.1,
             &mut rng,
+            &mut judge,
         );
-
-        if let Some(actual_rects) = judge.rects() {
-            let mcmc_rects = mcmc_sampler.sample(0.01, &mut rng);
-
-            for i in 0..input.rect_cnt() {
-                eprintln!(
-                    "{:02}: ({:4}, {:4}) | ({:4}, {:4}) | ({:4}, {:4})",
-                    i,
-                    round_u16(actual_rects[i].height()),
-                    round_u16(actual_rects[i].width()),
-                    gauss_rects.heights[i][0],
-                    gauss_rects.widths[i][0],
-                    mcmc_rects.heights[i][0],
-                    mcmc_rects.widths[i][0],
-                );
-            }
-        }
 
         for i in 0..arrange_count {
             let remaining_arrange_count = arrange_count - i;
