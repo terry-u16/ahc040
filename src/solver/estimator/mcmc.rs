@@ -4,7 +4,9 @@ use crate::{
         Dir::{Left, Up},
         Input, Op,
     },
-    solver::simd::{round_u16, AlignedF32, AlignedU16, SimdRectSet, AVX2_F32_W, AVX2_U16_W},
+    solver::simd::{
+        round_i16, round_u16, AlignedF32, AlignedU16, SimdRectSet, AVX2_F32_W, AVX2_U16_W,
+    },
 };
 use core::arch::x86_64::*;
 use itertools::{izip, Itertools};
@@ -552,11 +554,10 @@ impl Neighbor {
         const UPPER_BOUND: u16 = round_u16(Input::MAX_RECT_SIZE);
 
         for i in 0..AVX2_U16_W {
-            let len = current.0[i] as f64;
-            let dist = Normal::new(0.0, len * 0.005).unwrap();
+            let dist = Normal::new(0.0, std_dev).unwrap();
 
             delta[i] = loop {
-                let d = dist.sample(rng).round() as i16;
+                let d = round_i16(dist.sample(rng).round() as i32);
                 let new_x = current.0[i].wrapping_add_signed(d);
 
                 if d != 0 && LOWER_BOUND <= new_x && new_x <= UPPER_BOUND {
