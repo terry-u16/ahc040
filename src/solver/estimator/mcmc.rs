@@ -369,16 +369,16 @@ impl State {
         y1.fill(AlignedU16::default());
 
         // 座標がこれ以上になったら衝突判定をしなくても大丈夫という閾値
-        // y座標はbase次第なので、baseが壁でない場合はINFを入れる
+        // y座標はbase次第なので、baseが壁でない場合は0を入れる
         let threshold_x = max_rect_size;
         let mut threshold_y = match base {
-            Some(_) => _mm256_set1_epi16((u16::MAX >> 1) as i16),
+            Some(_) => _mm256_setzero_si256(),
             None => max_rect_size,
         };
 
-        for (turn, &op) in ops.iter().enumerate() {
-            // 全長方形がmax_rect_sizeを超えていれば安全なので、頑張って判定
-            // x, y方向それぞれ閾値を超えていないか
+        for &op in ops.iter() {
+            // 全長方形がmax_rect_size以上ならば安全なので、頑張って判定
+            // x, y方向それぞれ閾値未満か（未満なら判定が必要）
             let x_ng = _mm256_cmpgt_epi16(threshold_x, width);
             let y_ng = _mm256_cmpgt_epi16(threshold_y, height);
 
@@ -389,9 +389,10 @@ impl State {
             // 16並列全て条件を満たすのであればflagは0になる（不等号の向きに注意）
             let ng = _mm256_blendv_epi8(x_ng, y_ng, y_mask);
             let flag = _mm256_movemask_epi8(ng);
+            let rect_i = op.rect_idx();
 
             if flag == 0 {
-                // 座標がmax_rect_sizeを超えているので衝突判定不要
+                // 座標がmax_rect_size以上なので衝突判定不要
                 // 高さ、幅どちらを取るかビット演算で求める
                 // rotate_maskはrotateがtrueなら全て0、falseなら全て1
                 let not_rotate_mask = _mm256_set1_epi8((op.rotate() as i8) - 1);
@@ -410,7 +411,6 @@ impl State {
                 // 真面目に衝突判定をする
                 // こちらが呼ばれる回数は少ないためちょっと処理をサボっても大丈夫
                 let rotate = op.rotate();
-                let rect_i = op.rect_idx();
 
                 match op.dir() {
                     Left => {
@@ -453,11 +453,16 @@ impl State {
                         );
                     }
                 };
+            }
 
-                // base == rect_index である場合、INFとしていたthreshold_yを更新
-                if Some(op.rect_idx()) == base {
-                    threshold_y = _mm256_add_epi16(y1[turn].load(), max_rect_size);
-                }
+            // base == rect_index である場合、INFとしていたthreshold_yを更新
+            // 併せて衝突判定用にx0, x1, y1も更新
+            if Some(op.rect_idx()) == base {
+                x0[rect_i] = _mm256_setzero_si256().into();
+                x1[rect_i] = rect_w[rect_i];
+                y0[rect_i] = _mm256_sub_epi16(height, rect_h[rect_i].load()).into();
+                y1[rect_i] = height.into();
+                threshold_y = _mm256_add_epi16(height, max_rect_size);
             }
         }
 
