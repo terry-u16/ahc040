@@ -32,7 +32,7 @@ impl MultiBeamArrangerSimd {
         let standard_beam_width = 100_000 / (input.rect_cnt() as usize);
         let beam_width_suggester = BayesianBeamWidthSuggester::new(
             input.rect_cnt(),
-            7,
+            5,
             remaining_time,
             standard_beam_width,
             1,

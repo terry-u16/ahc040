@@ -24,7 +24,7 @@ impl Params {
         let query_annealing_duration_sec = get_env("AHC_QUERY_ANNEALING_DURATION_SEC", 0.3);
         let mcmc_init_duration_sec = get_env("AHC_MCMC_INIT_DURATION_SEC", 0.1);
         let beam_mcts_duration_ratio = get_env("AHC_BEAM_MCTS_DURATION_RATIO", 0.5);
-        let mcmc_duration_ratio = get_env("AHC_MCMC_DURATION_RATIO", 0.5);
+        let mcmc_duration_ratio = get_env("AHC_MCMC_DURATION_RATIO", 0.1);
         let mcts_turn = get_env("AHC_MCTS_TURN", 15);
         let mcts_expansion_threshold = get_env("AHC_MCTS_EXPANSION_THRESHOLD", 3);
         let mcts_candidates_count = get_env("AHC_MCTS_CANDIDATES_COUNT", 4);

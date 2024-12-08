@@ -1,0 +1,34 @@
+[general]
+version = "0.1.1"
+
+[problem]
+problem_name = "ahc040"
+objective = "Min"
+score_regex = '(?m)^\s*Score\s*=\s*(?P<score>\d+)\s*$'
+
+[test]
+start_seed = 0
+end_seed = 128
+threads = 0
+out_dir = "./pahcer"
+
+
+[[test.compile_steps]]
+program = "cargo"
+args = ["build", "--release", "--features", "local"]
+
+[[test.compile_steps]]
+program = "rm"
+args = ["-f", "./ahc040"]
+
+[[test.compile_steps]]
+program = "mv"
+args = ["../target/release/ahc040", "./ahc040"]
+
+[[test.test_steps]]
+program = "./ahc040"
+args = []
+stdin = "./pahcer/in/{SEED04}.txt"
+stdout = "./pahcer/out/{SEED04}.txt"
+stderr = "./pahcer/err/{SEED04}.txt"
+measure_time = true
