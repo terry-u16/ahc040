@@ -1,6 +1,5 @@
 pub mod gauss;
 pub mod mcmc;
-mod monte_carlo;
 
 use super::simd::SimdRectSet;
 use crate::problem::Op;
@@ -14,15 +13,6 @@ pub(super) fn get_placements(
     rng: &mut impl Rng,
 ) -> (Vec<Op>, DVector<f64>, DVector<f64>) {
     estimator.get_next_placements(duration, rng)
-}
-
-pub(super) fn get_monte_carlo_sampler(
-    input: &crate::problem::Input,
-    sampler: &mut impl Sampler,
-    rng: &mut impl Rng,
-    candidate_cnt: usize,
-) -> impl UpdatableSampler {
-    monte_carlo::MonteCarloSampler::new(input, sampler, rng, candidate_cnt)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -43,10 +33,6 @@ impl Placement {
 
 pub(super) trait Sampler {
     fn sample(&mut self, rng: &mut impl Rng) -> SimdRectSet;
-}
-
-pub(super) trait UpdatableSampler: Sampler {
-    fn update(&mut self, observation: &Observation2d);
 }
 
 #[derive(Debug, Clone)]

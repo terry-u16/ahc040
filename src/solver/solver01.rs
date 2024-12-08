@@ -6,7 +6,7 @@ use crate::{
     problem::{Input, Judge},
     solver::{
         arranger::{mcts::MCTSArranger, multi_beam_simd::MultiBeamArrangerSimd},
-        estimator::{self, mcmc, Observation2d, Sampler as _, UpdatableSampler},
+        estimator::{self, mcmc, Observation2d, Sampler as _},
         simd::round_u16,
     },
 };
