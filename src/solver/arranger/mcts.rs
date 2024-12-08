@@ -253,7 +253,6 @@ struct State {
     placements_y1: [AlignedU16; Input::MAX_RECT_CNT],
     turn: usize,
     rect_count: usize,
-    avaliable_base_left: u128,
     avaliable_base_up: u128,
     min_rect_size: AlignedU16,
     score_coef: f32, // 1 / (√Σ(w_i * h_i) * PARALLEL_CNT) で正規化するための値
@@ -340,7 +339,6 @@ impl State {
             placements_y0: placements.clone(),
             placements_y1: placements.clone(),
             turn: 0,
-            avaliable_base_left: 0,
             avaliable_base_up: 0,
             min_rect_size,
             rect_count: input.rect_cnt(),
@@ -351,15 +349,14 @@ impl State {
     fn apply_init_ops(&mut self, ops: &[Op]) {
         for &op in ops {
             // 無効な候補の列挙
-            let left_xor = self.get_left_invalid_bases(self.turn);
             let up_xor = self.get_up_invalid_bases(self.turn);
 
             // 生成
             let rotates = op.rotate();
             let base = op.base();
             let action = match op.dir() {
-                Dir::Left => self.gen_left_action(base, rotates, left_xor, up_xor),
-                Dir::Up => self.gen_up_action(base, rotates, left_xor, up_xor),
+                Dir::Left => unreachable!("Left is not supported"),
+                Dir::Up => self.gen_up_action(base, rotates, up_xor),
             }
             .unwrap();
 
@@ -401,9 +398,7 @@ impl State {
 
     fn gen_all_actions(&self) -> Vec<Action> {
         // 無効な候補の列挙
-        let left_xor = self.get_left_invalid_bases(self.turn);
         let up_xor = self.get_up_invalid_bases(self.turn);
-        let left_cands = self.avaliable_base_left & !left_xor;
         let up_cands = self.avaliable_base_up & !up_xor;
 
         // 生成
@@ -411,10 +406,10 @@ impl State {
         let mut actions = vec![];
 
         for rotate in rotates {
-            actions.extend(self.gen_up_action(None, rotate, left_xor, up_xor));
+            actions.extend(self.gen_up_action(None, rotate, up_xor));
 
             for base in BitSetIterU128::new(up_cands) {
-                actions.extend(self.gen_up_action(Some(base), rotate, left_xor, up_xor));
+                actions.extend(self.gen_up_action(Some(base), rotate, up_xor));
             }
         }
 
@@ -423,18 +418,16 @@ impl State {
 
     fn gen_min_topline(&self, rotate: bool) -> Action {
         // 無効な候補の列挙
-        let left_xor = self.get_left_invalid_bases(self.turn);
         let up_xor = self.get_up_invalid_bases(self.turn);
-        let left_cands = self.avaliable_base_left & !left_xor;
         let up_cands = self.avaliable_base_up & !up_xor;
 
         // Toplineが最も低くなる場所を探す
         // 壁に寄せたUPは常にvalid
-        let mut best_action = self.gen_up_action(None, rotate, left_xor, up_xor).unwrap();
+        let mut best_action = self.gen_up_action(None, rotate, up_xor).unwrap();
         let mut best_score = best_action.top_value();
 
         for action in BitSetIterU128::new(up_cands)
-            .map(|base| self.gen_up_action(Some(base), rotate, left_xor, up_xor))
+            .map(|base| self.gen_up_action(Some(base), rotate, up_xor))
             .flatten()
         {
             let score = action.top_value();
@@ -446,52 +439,10 @@ impl State {
         best_action
     }
 
-    fn gen_left_action(
-        &self,
-        base: Option<usize>,
-        rotate: bool,
-        available_base_left_xor: u128,
-        available_base_up_xor: u128,
-    ) -> Option<Action> {
-        let turn = self.turn;
-        let rect_h = self.rects_h[turn].into();
-        let rect_w = self.rects_w[turn].into();
-        let placements_x0 = &self.placements_x0[..turn];
-        let placements_x1 = &self.placements_x1[..turn];
-        let placements_y0 = &self.placements_y0[..turn];
-        let placements_y1 = &self.placements_y1[..turn];
-        let heights = self.heights.into();
-        let widths = self.widths.into();
-        let width_limit = self.width_limit;
-        let height_limit = self.height_limit;
-
-        unsafe {
-            self.gen_action(
-                turn,
-                base,
-                rotate,
-                rect_h,
-                rect_w,
-                placements_x0,
-                placements_x1,
-                placements_y0,
-                placements_y1,
-                heights,
-                widths,
-                available_base_left_xor,
-                available_base_up_xor,
-                width_limit,
-                height_limit,
-                false,
-            )
-        }
-    }
-
     fn gen_up_action(
         &self,
         base: Option<usize>,
         rotate: bool,
-        available_base_left_xor: u128,
         available_base_up_xor: u128,
     ) -> Option<Action> {
         // 下からrectを置くので、水平・垂直を入れ替える
@@ -504,8 +455,6 @@ impl State {
         let placements_y1 = &self.placements_x1[..turn];
         let heights = self.widths.into();
         let widths = self.heights.into();
-        let (available_base_left_xor, available_base_up_xor) =
-            (available_base_up_xor, available_base_left_xor);
         let width_limit = self.height_limit;
         let height_limit = self.width_limit;
 
@@ -522,7 +471,6 @@ impl State {
                 placements_y1,
                 heights,
                 widths,
-                available_base_left_xor,
                 available_base_up_xor,
                 width_limit,
                 height_limit,
@@ -547,7 +495,6 @@ impl State {
         placements_y1: &[AlignedU16],
         heights: AlignedU16,
         widths: AlignedU16,
-        available_base_left_xor: u128,
         available_base_up_xor: u128,
         width_limit: AlignedU16,
         height_limit: AlignedU16,
@@ -639,7 +586,6 @@ impl State {
 
         let op = Op::new(turn, rotate, Dir::Left, base);
 
-        let avaliable_base_left_xor = available_base_left_xor | (1 << turn);
         let avaliable_base_up_xor = available_base_up_xor | (1 << turn);
 
         Some(Action::new(
@@ -650,40 +596,9 @@ impl State {
             new_width.into(),
             new_height.into(),
             op,
-            avaliable_base_left_xor,
             avaliable_base_up_xor,
             flip,
         ))
-    }
-
-    fn get_left_invalid_bases(&self, turn: usize) -> u128 {
-        if turn == 0 {
-            return 0;
-        }
-
-        let prev_turn = turn - 1;
-        let placements_x1 = &self.placements_x1;
-        let placements_y1 = &self.placements_y1;
-
-        let new_x1 = self.placements_x1[prev_turn];
-        let new_y0 = self.placements_y0[prev_turn];
-        let new_y1 = self.placements_y1[prev_turn];
-        let available_flag = self.avaliable_base_left;
-        let width_limit = self.width_limit;
-        let min_rect_size = self.min_rect_size;
-
-        unsafe {
-            Self::get_invalid_bases(
-                placements_x1,
-                placements_y1,
-                new_x1,
-                new_y0,
-                new_y1,
-                available_flag,
-                width_limit,
-                min_rect_size,
-            )
-        }
     }
 
     fn get_up_invalid_bases(&self, turn: usize) -> u128 {
@@ -775,11 +690,9 @@ struct Action {
     placements_x1: AlignedU16,
     placements_y0: AlignedU16,
     placements_y1: AlignedU16,
-    placements_xor: AlignedU16, // x1 ^ y1 をハッシュとする
     new_widths: AlignedU16,
     new_heights: AlignedU16,
     op: Op,
-    avaliable_base_left_xor: u128,
     avaliable_base_up_xor: u128,
 }
 
@@ -792,15 +705,13 @@ impl Action {
         mut new_widths: AlignedU16,
         mut new_heights: AlignedU16,
         mut op: Op,
-        mut avaliable_base_left_xor: u128,
-        mut avaliable_base_up_xor: u128,
+        avaliable_base_up_xor: u128,
         flip: bool,
     ) -> Self {
         if flip {
             std::mem::swap(&mut placements_x0, &mut placements_y0);
             std::mem::swap(&mut placements_x1, &mut placements_y1);
             std::mem::swap(&mut new_widths, &mut new_heights);
-            std::mem::swap(&mut avaliable_base_left_xor, &mut avaliable_base_up_xor);
             let dir = match op.dir() {
                 Dir::Left => Dir::Up,
                 Dir::Up => Dir::Left,
@@ -809,19 +720,14 @@ impl Action {
             op = Op::new(op.rect_idx(), op.rotate(), dir, op.base());
         }
 
-        let placements_xor =
-            unsafe { _mm256_xor_si256(placements_x1.load(), placements_y1.load()).into() };
-
         Self {
             placements_x0,
             placements_x1,
             placements_y0,
             placements_y1,
-            placements_xor,
             new_widths,
             new_heights,
             op,
-            avaliable_base_left_xor,
             avaliable_base_up_xor,
         }
     }
@@ -834,16 +740,7 @@ impl Action {
         state.widths = self.new_widths;
         state.heights = self.new_heights;
         state.turn += 1;
-        state.avaliable_base_left ^= self.avaliable_base_left_xor;
         state.avaliable_base_up ^= self.avaliable_base_up_xor;
-    }
-
-    fn bottom_left_value(&self) -> u64 {
-        unsafe {
-            let x0_sum = horizontal_add_u16(self.placements_x0.load()) as u64;
-            let y0_sum = horizontal_add_u16(self.placements_y0.load()) as u64;
-            (y0_sum << 32) | x0_sum
-        }
     }
 
     fn top_value(&self) -> u32 {
@@ -851,17 +748,5 @@ impl Action {
             let y1_sum = horizontal_add_u16(self.placements_y1.load());
             y1_sum
         }
-    }
-
-    #[target_feature(enable = "avx,avx2")]
-    unsafe fn are_same_placement(&self, other: &Self) -> bool {
-        // xorハッシュが一致していたら同じ配置と見なす
-        let xor0 = self.placements_xor.load();
-        let xor1 = other.placements_xor.load();
-
-        let eq = _mm256_cmpeq_epi16(xor0, xor1);
-        let mask = _mm256_movemask_epi8(eq);
-
-        mask == -1
     }
 }

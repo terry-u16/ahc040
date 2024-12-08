@@ -6,7 +6,6 @@ use crate::{
 };
 use itertools::izip;
 use ordered_float::OrderedFloat;
-use rand::Rng;
 use std::arch::x86_64::*;
 
 /// 多変量正規分布からN個の長方形を16インスタンス生成し、それぞれについて並行に操作を行うビームサーチ。
@@ -20,12 +19,11 @@ impl MultiBeamArrangerSimd {
         input: &Input,
         end_turn: usize,
         rects: SimdRectSet,
-        rng: &mut impl Rng,
         duration_sec: f64,
     ) -> Vec<Op> {
         let since = std::time::Instant::now();
 
-        let large_state = unsafe { LargeState::new(input.clone(), rects, rng) };
+        let large_state = unsafe { LargeState::new(input.clone(), rects) };
         let small_state = SmallState::default();
         let act_gen = ActGen::new();
 
@@ -41,7 +39,7 @@ impl MultiBeamArrangerSimd {
             30000,
             0,
         );
-        let deduplicator = beam::HashSingleDeduplicator::new();
+        let deduplicator = beam::NoOpDeduplicator;
         let (ops, _) = beam.run(
             large_state,
             small_state,
@@ -67,19 +65,14 @@ struct LargeState {
     placements_x1: [AlignedU16; Input::MAX_RECT_CNT],
     placements_y0: [AlignedU16; Input::MAX_RECT_CNT],
     placements_y1: [AlignedU16; Input::MAX_RECT_CNT],
-    hash: u32,
-    hash_base_x: [AlignedU16; Input::MAX_RECT_CNT],
-    hash_base_y: [AlignedU16; Input::MAX_RECT_CNT],
-    hash_base_rot: [u32; Input::MAX_RECT_CNT],
     turn: usize,
-    avaliable_base_left: u128,
     avaliable_base_up: u128,
     min_rect_size: AlignedU16,
 }
 
 impl LargeState {
     #[target_feature(enable = "avx,avx2")]
-    unsafe fn new(input: Input, rects: SimdRectSet, rng: &mut impl rand::Rng) -> Self {
+    unsafe fn new(input: Input, rects: SimdRectSet) -> Self {
         let mut rects_h = [AlignedU16::ZERO; Input::MAX_RECT_CNT];
         let mut rects_w = [AlignedU16::ZERO; Input::MAX_RECT_CNT];
 
@@ -88,18 +81,6 @@ impl LargeState {
             rects_w[i] = AlignedU16(rects.widths[i]);
         }
 
-        let hash_base_x = core::array::from_fn(|_| {
-            let mut v = [0; AVX2_U16_W];
-            rng.fill(&mut v);
-            AlignedU16(v)
-        });
-        let hash_base_y = core::array::from_fn(|_| {
-            let mut v = [0; AVX2_U16_W];
-            rng.fill(&mut v);
-            AlignedU16(v)
-        });
-        let mut hash_base_rot = [0; Input::MAX_RECT_CNT];
-        rng.fill(&mut hash_base_rot);
         let placements = [AlignedU16::ZERO; Input::MAX_RECT_CNT];
 
         // 最初から幅を確保しておく
@@ -147,12 +128,7 @@ impl LargeState {
             placements_x1: placements.clone(),
             placements_y0: placements.clone(),
             placements_y1: placements.clone(),
-            hash: 0,
-            hash_base_x,
-            hash_base_y,
-            hash_base_rot,
             turn: 0,
-            avaliable_base_left: 0,
             avaliable_base_up: 0,
             min_rect_size,
         }
@@ -169,11 +145,8 @@ struct SmallState {
     old_heights: AlignedU16,
     new_widths: AlignedU16,
     new_heights: AlignedU16,
-    hash: u32,
-    hash_xor: u32,
     op: Op,
     score: f32,
-    avaliable_base_left_xor: u128,
     avaliable_base_up_xor: u128,
 }
 
@@ -187,11 +160,8 @@ impl SmallState {
         mut old_heights: AlignedU16,
         mut new_widths: AlignedU16,
         mut new_heights: AlignedU16,
-        hash: u32,
-        hash_xor: u32,
         mut op: Op,
-        mut avaliable_base_left_xor: u128,
-        mut avaliable_base_up_xor: u128,
+        avaliable_base_up_xor: u128,
         flip: bool,
     ) -> Self {
         if flip {
@@ -199,7 +169,6 @@ impl SmallState {
             std::mem::swap(&mut placements_x1, &mut placements_y1);
             std::mem::swap(&mut old_widths, &mut old_heights);
             std::mem::swap(&mut new_widths, &mut new_heights);
-            std::mem::swap(&mut avaliable_base_left_xor, &mut avaliable_base_up_xor);
             let dir = match op.dir() {
                 Dir::Left => Dir::Up,
                 Dir::Up => Dir::Left,
@@ -219,11 +188,8 @@ impl SmallState {
             old_heights,
             new_widths,
             new_heights,
-            hash,
-            hash_xor,
             op,
             score,
-            avaliable_base_left_xor,
             avaliable_base_up_xor,
         }
     }
@@ -277,11 +243,8 @@ impl Default for SmallState {
             old_heights: AlignedU16::ZERO,
             new_widths: AlignedU16::ZERO,
             new_heights: AlignedU16::ZERO,
-            hash: Default::default(),
-            hash_xor: Default::default(),
             op: Default::default(),
             score: Default::default(),
-            avaliable_base_left_xor: Default::default(),
             avaliable_base_up_xor: Default::default(),
         }
     }
@@ -305,7 +268,7 @@ impl beam::SmallState for SmallState {
     }
 
     fn hash(&self) -> Self::Hash {
-        self.hash
+        0
     }
 
     fn apply(&self, state: &mut Self::LargeState) {
@@ -315,9 +278,7 @@ impl beam::SmallState for SmallState {
         state.placements_y1[state.turn] = self.placements_y1;
         state.widths = self.new_widths;
         state.heights = self.new_heights;
-        state.hash ^= self.hash_xor;
         state.turn += 1;
-        state.avaliable_base_left ^= self.avaliable_base_left_xor;
         state.avaliable_base_up ^= self.avaliable_base_up_xor;
     }
 
@@ -325,9 +286,7 @@ impl beam::SmallState for SmallState {
         // placementsは削除しなくても良い
         state.widths = self.old_widths;
         state.heights = self.old_heights;
-        state.hash ^= self.hash_xor;
         state.turn -= 1;
-        state.avaliable_base_left ^= self.avaliable_base_left_xor;
         state.avaliable_base_up ^= self.avaliable_base_up_xor;
     }
 
@@ -343,62 +302,12 @@ impl ActGen {
         Self
     }
 
-    fn gen_left_cand(
-        &self,
-        large_state: &LargeState,
-        base: Option<usize>,
-        rotate: bool,
-        available_base_left_xor: u128,
-        available_base_up_xor: u128,
-    ) -> Option<SmallState> {
-        let turn = large_state.turn;
-        let rect_h = large_state.rects_h[turn].into();
-        let rect_w = large_state.rects_w[turn].into();
-        let placements_x0 = &large_state.placements_x0[..turn];
-        let placements_x1 = &large_state.placements_x1[..turn];
-        let placements_y0 = &large_state.placements_y0[..turn];
-        let placements_y1 = &large_state.placements_y1[..turn];
-        let heights = large_state.heights.into();
-        let widths = large_state.widths.into();
-        let hash = large_state.hash;
-        let hash_base_x = &large_state.hash_base_x;
-        let hash_base_y = &large_state.hash_base_y;
-        let hash_base_rot = &large_state.hash_base_rot;
-        let width_limit = large_state.width_limit;
-        let height_limit = large_state.height_limit;
-
-        unsafe {
-            self.gen_cand(
-                turn,
-                base,
-                rotate,
-                rect_h,
-                rect_w,
-                placements_x0,
-                placements_x1,
-                placements_y0,
-                placements_y1,
-                heights,
-                widths,
-                hash,
-                hash_base_x,
-                hash_base_y,
-                hash_base_rot,
-                available_base_left_xor,
-                available_base_up_xor,
-                width_limit,
-                height_limit,
-                false,
-            )
-        }
-    }
-
+    // 以前は左向きのrectを置いたりしていたので、その名残で残っている
     fn gen_up_cand(
         &self,
         large_state: &LargeState,
         base: Option<usize>,
         rotate: bool,
-        available_base_left_xor: u128,
         available_base_up_xor: u128,
     ) -> Option<SmallState> {
         // 下からrectを置くので、水平・垂直を入れ替える
@@ -411,12 +320,6 @@ impl ActGen {
         let placements_y1 = &large_state.placements_x1[..turn];
         let heights = large_state.widths.into();
         let widths = large_state.heights.into();
-        let hash = large_state.hash;
-        let hash_base_x = &large_state.hash_base_y;
-        let hash_base_y = &large_state.hash_base_x;
-        let hash_base_rot = &large_state.hash_base_rot;
-        let (available_base_left_xor, available_base_up_xor) =
-            (available_base_up_xor, available_base_left_xor);
         let width_limit = large_state.height_limit;
         let height_limit = large_state.width_limit;
 
@@ -433,11 +336,6 @@ impl ActGen {
                 placements_y1,
                 heights,
                 widths,
-                hash,
-                hash_base_x,
-                hash_base_y,
-                hash_base_rot,
-                available_base_left_xor,
                 available_base_up_xor,
                 width_limit,
                 height_limit,
@@ -462,11 +360,6 @@ impl ActGen {
         placements_y1: &[AlignedU16],
         heights: AlignedU16,
         widths: AlignedU16,
-        hash: u32,
-        hash_base_x: &[AlignedU16],
-        hash_base_y: &[AlignedU16],
-        hash_base_rot: &[u32],
-        available_base_left_xor: u128,
         available_base_up_xor: u128,
         width_limit: AlignedU16,
         height_limit: AlignedU16,
@@ -551,36 +444,13 @@ impl ActGen {
             return None;
         }
 
-        // ハッシュ計算
-        // 16bit * 16bit = 32bit を上位・下位16bitずつに分け、それぞれのxorを取る
-        let hash_base_x = hash_base_x[turn].load();
-        let hash_base_y = hash_base_y[turn].load();
-
-        let x_mul_hi = _mm256_mulhi_epu16(x0, hash_base_x);
-        let x_mul_lo = _mm256_mullo_epi16(x0, hash_base_x);
-        let y_mul_hi = _mm256_mulhi_epu16(y0, hash_base_y);
-        let y_mul_lo = _mm256_mullo_epi16(y0, hash_base_y);
-
-        let mul_hi = _mm256_xor_si256(x_mul_hi, y_mul_hi);
-        let mul_lo = _mm256_xor_si256(x_mul_lo, y_mul_lo);
-        let mul_hi_xor = horizontal_xor_u16(mul_hi) as u32;
-        let mul_lo_xor = horizontal_xor_u16(mul_lo) as u32;
-
-        // 適当に並べる
-        // xとyの対称性がないとflip時に壊れるので注意
-        let mut hash_xor = (mul_hi_xor << 16) | mul_lo_xor;
-
-        hash_xor ^= hash_base_rot[turn] * rotate as u32;
-
         let heights = heights.load();
         let widths = widths.load();
         let new_width = _mm256_max_epu16(x1, widths);
         let new_height = _mm256_max_epu16(y1, heights);
 
-        let hash = hash ^ hash_xor;
         let op = Op::new(turn, rotate, Dir::Left, base);
 
-        let avaliable_base_left_xor = available_base_left_xor | (1 << turn);
         let avaliable_base_up_xor = available_base_up_xor | (1 << turn);
 
         Some(SmallState::new(
@@ -592,43 +462,10 @@ impl ActGen {
             heights.into(),
             new_width.into(),
             new_height.into(),
-            hash,
-            hash_xor,
             op,
-            avaliable_base_left_xor,
             avaliable_base_up_xor,
             flip,
         ))
-    }
-
-    fn get_left_invalid_bases(large_state: &LargeState, turn: usize) -> u128 {
-        if turn == 0 {
-            return 0;
-        }
-
-        let prev_turn = turn - 1;
-        let placements_x1 = &large_state.placements_x1;
-        let placements_y1 = &large_state.placements_y1;
-
-        let new_x1 = large_state.placements_x1[prev_turn];
-        let new_y0 = large_state.placements_y0[prev_turn];
-        let new_y1 = large_state.placements_y1[prev_turn];
-        let available_flag = large_state.avaliable_base_left;
-        let width_limit = large_state.width_limit;
-        let min_rect_size = large_state.min_rect_size;
-
-        unsafe {
-            Self::get_invalid_bases(
-                placements_x1,
-                placements_y1,
-                new_x1,
-                new_y0,
-                new_y1,
-                available_flag,
-                width_limit,
-                min_rect_size,
-            )
-        }
     }
 
     fn get_up_invalid_bases(large_state: &LargeState, turn: usize) -> u128 {
@@ -722,9 +559,7 @@ impl beam::ActGen<SmallState> for ActGen {
         next_states: &mut Vec<SmallState>,
     ) {
         // 無効な候補の列挙
-        let invalid_bases_left = Self::get_left_invalid_bases(large_state, large_state.turn);
         let invalid_bases_up = Self::get_up_invalid_bases(large_state, large_state.turn);
-        let avaliable_bases_left = large_state.avaliable_base_left & !invalid_bases_left;
         let avaliable_bases_up = large_state.avaliable_base_up & !invalid_bases_up;
 
         // 生成
@@ -736,7 +571,6 @@ impl beam::ActGen<SmallState> for ActGen {
                 &large_state,
                 None,
                 rotate,
-                invalid_bases_left,
                 invalid_bases_up,
             ));
 
@@ -745,7 +579,6 @@ impl beam::ActGen<SmallState> for ActGen {
                     &large_state,
                     Some(i),
                     rotate,
-                    invalid_bases_left,
                     invalid_bases_up,
                 ));
             }

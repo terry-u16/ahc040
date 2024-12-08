@@ -101,7 +101,6 @@ impl Solver for Solver01 {
                 &input,
                 first_step_turn,
                 sampled_rects.clone(),
-                &mut rng,
                 beam_duration,
             );
 
