@@ -1,5 +1,5 @@
 pub mod gauss;
-mod monte_carlo;
+pub mod mcmc;
 
 use super::simd::SimdRectSet;
 use crate::problem::Op;
@@ -13,15 +13,6 @@ pub(super) fn get_placements(
     rng: &mut impl Rng,
 ) -> (Vec<Op>, DVector<f64>, DVector<f64>) {
     estimator.get_next_placements(duration, rng)
-}
-
-pub(super) fn get_monte_carlo_sampler(
-    input: &crate::problem::Input,
-    sampler: &mut impl Sampler,
-    rng: &mut impl Rng,
-    candidate_cnt: usize,
-) -> impl UpdatableSampler {
-    monte_carlo::MonteCarloSampler::new(input, sampler, rng, candidate_cnt)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -44,23 +35,33 @@ pub(super) trait Sampler {
     fn sample(&mut self, rng: &mut impl Rng) -> SimdRectSet;
 }
 
-pub(super) trait UpdatableSampler: Sampler {
-    fn update(&mut self, observation: &Observation2d);
-}
-
 #[derive(Debug, Clone)]
-pub(super) struct Observation2d {
+pub(crate) struct Observation2d {
     operations: Vec<Op>,
     len_x: u32,
     len_y: u32,
+    is_2d: bool,
 }
 
 impl Observation2d {
-    pub(super) fn new(operations: Vec<Op>, len_x: u32, len_y: u32) -> Self {
+    pub(super) fn new(operations: Vec<Op>, len_x: u32, len_y: u32, is_square: bool) -> Self {
         Self {
             operations,
             len_x,
             len_y,
+            is_2d: is_square,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RectStdDev {
+    widths: Vec<f64>,
+    heights: Vec<f64>,
+}
+
+impl RectStdDev {
+    fn new(widths: Vec<f64>, heights: Vec<f64>) -> Self {
+        Self { widths, heights }
     }
 }

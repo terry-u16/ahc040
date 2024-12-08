@@ -39,7 +39,7 @@ impl MultiBeamArrangerSimd {
             standard_beam_width,
             1,
             30000,
-            1,
+            0,
         );
         let deduplicator = beam::HashSingleDeduplicator::new();
         let (ops, _) = beam.run(

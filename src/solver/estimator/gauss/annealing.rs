@@ -1,6 +1,6 @@
 use super::GaussEstimator;
 use crate::{
-    problem::{Dir, Op, Rect},
+    problem::{Dir, Input, Op, Rect},
     sa::{self},
     solver::estimator::Placement,
     util::ChangeMinMax,
@@ -37,8 +37,8 @@ impl Env {
             .map(|i| {
                 let height = estimator.mean_height()[i].round() as u32;
                 let width = estimator.mean_width()[i].round() as u32;
-                let height = height.clamp(20000, 100000);
-                let width = width.clamp(20000, 100000);
+                let height = height.clamp(Input::MIN_RECT_SIZE, Input::MAX_RECT_SIZE);
+                let width = width.clamp(Input::MIN_RECT_SIZE, Input::MAX_RECT_SIZE);
                 Rect::new(height, width)
             })
             .collect_vec();

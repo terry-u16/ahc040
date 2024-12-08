@@ -1,6 +1,6 @@
 mod annealing;
 
-use super::Sampler;
+use super::{RectStdDev, Sampler};
 use crate::{
     problem::{Input, Op, Rect},
     solver::simd::{round_u16, SimdRectSet, AVX2_U16_W},
@@ -130,6 +130,20 @@ impl GaussEstimator {
     pub fn variance_width(&self) -> Vec<f64> {
         self.variance_diag()[self.rect_cnt..].to_vec()
     }
+
+    pub(crate) fn rect_std_dev(&self) -> RectStdDev {
+        let std_dev_h = self
+            .variance_height()
+            .into_iter()
+            .map(|v| v.sqrt())
+            .collect();
+        let std_dev_w = self
+            .variance_width()
+            .into_iter()
+            .map(|v| v.sqrt())
+            .collect();
+        RectStdDev::new(std_dev_w, std_dev_h)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -179,8 +193,10 @@ impl Sampler for GaussSampler<'_> {
             let values = &self.cholesky.l() * DVector::from_vec(values) + &self.estimator.mean;
 
             for rect_i in 0..self.estimator.rect_cnt {
-                let height = (values[rect_i].round() as u32).clamp(20000, 100000);
-                let width = (values[rect_i + self.estimator.rect_cnt] as u32).clamp(20000, 100000);
+                let height = (values[rect_i].round() as u32)
+                    .clamp(Input::MIN_RECT_SIZE, Input::MAX_RECT_SIZE);
+                let width = (values[rect_i + self.estimator.rect_cnt] as u32)
+                    .clamp(Input::MIN_RECT_SIZE, Input::MAX_RECT_SIZE);
                 heights[rect_i][simd_i] = round_u16(height);
                 widths[rect_i][simd_i] = round_u16(width);
             }

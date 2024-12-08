@@ -6,7 +6,8 @@ use crate::{
     problem::{Input, Judge},
     solver::{
         arranger::{mcts::MCTSArranger, multi_beam_simd::MultiBeamArrangerSimd},
-        estimator::{self, Observation2d, Sampler as _, UpdatableSampler},
+        estimator::{self, mcmc, Observation2d, Sampler as _},
+        simd::round_u16,
     },
 };
 use rand::SeedableRng;
@@ -39,70 +40,81 @@ impl Solver for Solver01 {
 
             estimator.update(observation_x);
             estimator.update(observation_y);
-            observations.push(Observation2d::new(ops, measure.width(), measure.height()));
+            observations.push(Observation2d::new(
+                ops,
+                measure.width(),
+                measure.height(),
+                false,
+            ));
         }
 
         eprintln!("[Final]");
         estimator.dump_estimated(judge.rects());
+
         let mut gauss_sampler = estimator.get_sampler();
-        let mut use_monte_carlo = true;
-        let mut monte_carlo_sampler =
-            estimator::get_monte_carlo_sampler(input, &mut gauss_sampler, &mut rng, 1024);
-
-        while let Some(observation) = observations.pop() {
-            // 対数尤度の更新処理は重いので、時間がないときは多変量正規分布バージョンに切り替える
-            if input.since().elapsed().as_millis() >= 1000 {
-                use_monte_carlo = false;
-                break;
-            }
-
-            monte_carlo_sampler.update(&observation);
-        }
 
         let mut beam_arranger = MultiBeamArrangerSimd;
         let mut mcts_arranger = MCTSArranger;
+
+        let gauss_rects = gauss_sampler.sample(&mut rng);
+        let rect_std_dev = estimator.rect_std_dev();
+
+        let mut mcmc_sampler = mcmc::MCMCSampler::new(
+            input,
+            observations.clone(),
+            gauss_rects.clone(),
+            rect_std_dev,
+            0.1,
+            &mut rng,
+        );
+
+        if let Some(actual_rects) = judge.rects() {
+            let mcmc_rects = mcmc_sampler.sample(0.01, &mut rng);
+
+            for i in 0..input.rect_cnt() {
+                eprintln!(
+                    "{:02}: ({:4}, {:4}) | ({:4}, {:4}) | ({:4}, {:4})",
+                    i,
+                    round_u16(actual_rects[i].height()),
+                    round_u16(actual_rects[i].width()),
+                    gauss_rects.heights[i][0],
+                    gauss_rects.widths[i][0],
+                    mcmc_rects.heights[i][0],
+                    mcmc_rects.widths[i][0],
+                );
+            }
+        }
 
         for i in 0..arrange_count {
             let remaining_arrange_count = arrange_count - i;
             let duration =
                 (2.9 - input.since().elapsed().as_secs_f64()) / remaining_arrange_count as f64;
-            let beam_duration = duration * 0.5;
+            let beam_duration = duration * 0.4;
             let mcts_duration = duration * 0.5;
+            let mcmc_duration = duration * 0.1;
             let first_step_turn = input.rect_cnt() - 15;
-            let rects = gauss_sampler.sample(&mut rng);
 
-            let ops1 = if use_monte_carlo {
-                beam_arranger.arrange(
-                    &input,
-                    first_step_turn,
-                    rects.clone(),
-                    &mut rng,
-                    beam_duration,
-                )
-            } else {
-                beam_arranger.arrange(
-                    &input,
-                    first_step_turn,
-                    rects.clone(),
-                    &mut rng,
-                    beam_duration,
-                )
-            };
+            let sampled_rects = mcmc_sampler.sample(mcmc_duration, &mut rng);
+            //let sampled_rects = gauss_sampler.sample(&mut rng);
 
-            let ops2 = if use_monte_carlo {
-                mcts_arranger.arrange(&input, &ops1, rects, &mut rng, mcts_duration)
-            } else {
-                mcts_arranger.arrange(&input, &ops1, rects, &mut rng, mcts_duration)
-            };
+            let ops1 = beam_arranger.arrange(
+                &input,
+                first_step_turn,
+                sampled_rects.clone(),
+                &mut rng,
+                beam_duration,
+            );
+
+            let ops2 = mcts_arranger.arrange(&input, &ops1, sampled_rects, &mut rng, mcts_duration);
 
             let mut ops = ops1;
             ops.extend_from_slice(&ops2);
 
             let measure = judge.query(&ops);
 
-            if use_monte_carlo && i < arrange_count - 1 {
-                let observation = Observation2d::new(ops, measure.width(), measure.height());
-                monte_carlo_sampler.update(&observation);
+            if i < arrange_count - 1 {
+                let observation = Observation2d::new(ops, measure.width(), measure.height(), true);
+                mcmc_sampler.update(observation);
             }
         }
     }

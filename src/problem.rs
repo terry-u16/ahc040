@@ -15,6 +15,8 @@ pub struct Input {
 
 impl Input {
     pub const MAX_RECT_CNT: usize = 100;
+    pub const MAX_RECT_SIZE: u32 = 100000;
+    pub const MIN_RECT_SIZE: u32 = 10000;
 
     pub fn read() -> Self {
         input_interactive! {
@@ -114,8 +116,8 @@ impl Display for Measure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Dir {
     #[default]
-    Up,
-    Left,
+    Up = 0x00,
+    Left = 0x01,
 }
 
 impl Display for Dir {
