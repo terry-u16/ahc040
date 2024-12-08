@@ -291,7 +291,7 @@ impl Into<__m256> for AlignedF32 {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct SimdRectSet {
+pub struct SimdRectSet {
     /// 長方形の幅を16bit x 16個packしたもの
     pub(super) heights: Vec<[u16; AVX2_U16_W]>,
 

@@ -440,7 +440,7 @@ impl<S: SmallState> Node<S> {
 /// NodeVec用のindex
 /// 型安全性と、indexの内部的な型(u32 or u16)の変更を容易にすることが目的
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct NodeIndex(u16);
+struct NodeIndex(usize);
 
 impl NodeIndex {
     /// 何も指していないことを表す定数
@@ -455,7 +455,7 @@ impl Default for NodeIndex {
 
 impl From<usize> for NodeIndex {
     fn from(value: usize) -> Self {
-        Self(value as u16)
+        Self(value)
     }
 }
 
@@ -512,8 +512,8 @@ impl<S: SmallState> IndexMut<NodeIndex> for NodeVec<S> {
     }
 }
 
-/// 保持する最大ノード数。65536個にするとNULLノードと被るため65535個に抑えている
-const MAX_NODES: usize = std::u16::MAX as usize - 1;
+/// 保持する最大ノード数
+const MAX_NODES: usize = 131072;
 
 #[derive(Debug)]
 pub struct BeamSearch<S: SmallState, G: ActGen<S>> {

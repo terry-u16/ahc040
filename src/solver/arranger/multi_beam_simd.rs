@@ -1,8 +1,7 @@
-use super::Arranger;
 use crate::{
     beam::{self, BayesianBeamWidthSuggester},
     problem::{Dir, Input, Op},
-    solver::{estimator::Sampler, simd::*},
+    solver::simd::*,
     util::BitSetIterU128,
 };
 use itertools::izip;
@@ -13,19 +12,19 @@ use std::arch::x86_64::*;
 /// 多変量正規分布からN個の長方形を16インスタンス生成し、それぞれについて並行に操作を行うビームサーチ。
 /// 考え方は粒子フィルタなどと同じで、非線形性を考慮するために多数のインスタンスでシミュレートする。
 /// 内部的にAVX2を使用して高速化している。
-pub(super) struct MultiBeamArrangerSimd;
+pub struct MultiBeamArrangerSimd;
 
-impl Arranger for MultiBeamArrangerSimd {
-    fn arrange(
+impl MultiBeamArrangerSimd {
+    pub fn arrange(
         &mut self,
         input: &Input,
-        sampler: &mut impl Sampler,
+        end_turn: usize,
+        rects: SimdRectSet,
         rng: &mut impl Rng,
         duration_sec: f64,
     ) -> Vec<Op> {
         let since = std::time::Instant::now();
 
-        let rects = sampler.sample(rng);
         let large_state = unsafe { LargeState::new(input.clone(), rects, rng) };
         let small_state = SmallState::default();
         let act_gen = ActGen::new();
@@ -46,7 +45,7 @@ impl Arranger for MultiBeamArrangerSimd {
         let (ops, _) = beam.run(
             large_state,
             small_state,
-            input.rect_cnt(),
+            end_turn,
             beam_width_suggester,
             deduplicator,
         );
@@ -732,25 +731,6 @@ impl beam::ActGen<SmallState> for ActGen {
         let rotates = [false, true];
 
         for rotate in rotates {
-            // Left
-            next_states.extend(self.gen_left_cand(
-                &large_state,
-                None,
-                rotate,
-                invalid_bases_left,
-                invalid_bases_up,
-            ));
-
-            for i in BitSetIterU128::new(avaliable_bases_left) {
-                next_states.extend(self.gen_left_cand(
-                    &large_state,
-                    Some(i),
-                    rotate,
-                    invalid_bases_left,
-                    invalid_bases_up,
-                ));
-            }
-
             // Up
             next_states.extend(self.gen_up_cand(
                 &large_state,
