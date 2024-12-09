@@ -107,7 +107,7 @@ class Objective:
         # for more information, see https://optuna.readthedocs.io/en/stable/reference/generated/optuna.trial.Trial.html
         params = {
             "AHC_TOUCHING_THRESHOLD": str(
-                trial.suggest_int("touching_threshold", 8, 16)
+                trial.suggest_int("touching_threshold", 12, 16)
             ),
             "AHC_INVALID_CNT_THRESHOLD": str(
                 trial.suggest_int("invalid_cnt_threshold", 0, 3)
