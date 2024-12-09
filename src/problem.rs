@@ -43,7 +43,7 @@ impl Input {
         eprintln!("[Params]");
         eprintln!("{}", params);
 
-        *Params::get().borrow_mut() = params;
+        //*Params::get().borrow_mut() = params;
 
         Self {
             rect_cnt,
