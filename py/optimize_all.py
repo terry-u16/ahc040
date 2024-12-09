@@ -75,7 +75,6 @@ for iteration in range(1, 1000):
     )
 
     study.optimize(optimize.Objective(n, t, sigma), timeout=450)
-    optimize.run_optimization(study)
 
     print(f"best params = {study.best_params}")
     print(f"best score  = {study.best_value}")
