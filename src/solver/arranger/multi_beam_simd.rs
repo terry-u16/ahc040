@@ -94,8 +94,7 @@ impl LargeState {
             }
         }
 
-        // 10%余裕を持たせる
-        // TODO: パラメータ調整
+        // 少し余裕を持たせる
         let default_width =
             AlignedU16(areas.map(|a| (a as f64 * Params::get().borrow().width_buf).sqrt() as u16));
 
@@ -200,7 +199,6 @@ impl SmallState {
         // スコアの昇順にソートした上で、減衰させながら和を取る
         // （期待値を最大化するよりは上振れを狙いたいため）
         thread_local!(static SCORE_MUL: [AlignedF32; 2] = {
-            // TODO: パラメータ調整
             let score_mul = Params::get().borrow().parallel_score_mul;
             [
                 AlignedF32(std::array::from_fn(|i| score_mul.powi(i as i32))),

@@ -195,7 +195,6 @@ impl Node {
             let average_sq = average_score * average_score;
             let variance = sq_average - average_sq;
 
-            // TODO: パラメータ調整
             let var = variance + (2.0 * total_count_ln * inv_count).sqrt();
             let ucb1 = average_score
                 + Params::get().borrow().ucb1_tuned_coef
@@ -271,7 +270,6 @@ struct State {
 impl State {
     // スコア係数
     thread_local!(static SCORE_MUL: [AlignedF32; 2] = {
-        // TODO: パラメータ調整
         let score_mul = Params::get().borrow().parallel_score_mul;
         [
             AlignedF32(std::array::from_fn(|i| score_mul.powi(i as i32))),
@@ -304,8 +302,7 @@ impl State {
             }
         }
 
-        // 10%余裕を持たせる
-        // TODO: パラメータ調整
+        // 少し余裕を持たせる
         let default_width =
             AlignedU16(areas.map(|a| (a as f64 * Params::get().borrow().width_buf).sqrt() as u16));
 
