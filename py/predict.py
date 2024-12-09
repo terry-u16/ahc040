@@ -203,6 +203,12 @@ if __name__ == "__main__":
         f.write(f'const T: &[u8] = b"{pack.pack_vec(t_vec)}";\n')
         f.write(f'const SIGMA: &[u8] = b"{pack.pack_vec(sigma_vec)}";\n')
 
+        for param_name, p_array in zip(PARAM_NAMES, p_arrays):
+            name = f"{param_name.upper()}"
+            f.write(f'const {name}: &[u8] = b"{pack.pack_vec(p_array)}";\n')
+
         for param_name, param in zip(PARAM_NAMES, params):
-            name = f"AHC_{param_name.upper()}"
-            f.write(f'const {name}: &[u8] = b"{pack.pack_vec(param)}";\n')
+            name = f"{param_name.upper()}"
+            f.write(
+                f'const PARAM_{name}: &[u8] = b"{pack.pack_vec(np.array(param, dtype=np.float64))}";\n'
+            )

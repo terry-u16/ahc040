@@ -33,7 +33,7 @@ def generate_params(trial: optuna.trial.Trial) -> dict[str, str]:
         "AHC_PARALLEL_SCORE_MUL": str(
             trial.suggest_float("parallel_score_mul", 0.7, 1.0)
         ),
-        "AHC_WIDTH_BUF": str(trial.suggest_float("width_buf", 1.05, 1.15)),
+        "AHC_WIDTH_BUF": str(trial.suggest_float("width_buf", 1.02, 1.15)),
         "AHC_UCB1_TUNED_COEF": str(
             trial.suggest_float("ucb1_tuned_coef", 0.05, 1.0, log=True)
         ),
