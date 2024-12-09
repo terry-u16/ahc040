@@ -46,7 +46,8 @@ impl Solver for Solver01 {
         let duration = Params::get().borrow().query_annealing_duration_sec
             / (input.query_cnt() - arrange_trial_count) as f64;
 
-        for _ in 0..input.query_cnt() - arrange_trial_count {
+        for turn in 0..input.query_cnt() - arrange_trial_count {
+            eprintln!("[TURN] {}", turn);
             let (ops, edges_v, edges_h) =
                 estimator::get_placements(input, &mut estimator, duration, &mut rng);
             let measure = judge.query(&ops);
@@ -57,7 +58,7 @@ impl Solver for Solver01 {
             estimator.update(observation_y);
             let observation = Observation2d::new(ops, measure.width(), measure.height(), false);
             mcmc_sampler.update(observation);
-            mcmc_sampler.sample(0.0001, &mut rng);
+            estimator.enqueue_samples(mcmc_sampler.sample(0.01, &mut rng).into_iter());
         }
 
         eprintln!("[Final]");
@@ -79,7 +80,8 @@ impl Solver for Solver01 {
             let mcmc_duration = duration * Params::get().borrow().mcmc_duration_ratio;
             let first_step_turn = input.rect_cnt() - Params::get().borrow().mcts_turn;
 
-            let sampled_rects = mcmc_sampler.sample(mcmc_duration, &mut rng);
+            let sampled_rects = mcmc_sampler.sample(mcmc_duration, &mut rng).pop().unwrap();
+            //let sampled_rects = gauss_sampler.sample(&mut rng);
 
             let ops1 = beam_arranger.arrange(
                 &input,

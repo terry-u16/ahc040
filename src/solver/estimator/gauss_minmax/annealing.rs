@@ -207,14 +207,8 @@ impl State {
             ops.push(op);
 
             if i == env.edge1.rect_i {
-                // 小さい方に合わせた方が最終的な長方形の幅方向が長くなりやすい
-                let mean0 = env.mean[env.edge0.to_index(env.estimator.rect_cnt)];
-                let mean1 = env.mean[env.edge1.to_index(env.estimator.rect_cnt)];
-                base = Some(if mean0 < mean1 {
-                    env.edge0.rect_i
-                } else {
-                    env.edge1.rect_i
-                });
+                // 左の奴に合わせる
+                base = Some(env.edge0.rect_i);
             }
         }
 

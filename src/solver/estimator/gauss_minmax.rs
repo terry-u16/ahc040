@@ -112,6 +112,16 @@ impl GaussEstimator {
         }
     }
 
+    pub fn enqueue_samples(&mut self, samples: impl Iterator<Item = SimdRectSet>) {
+        for sample in samples {
+            if self.sample_history.len() >= Self::HISTORY_QUEUE_SIZE {
+                self.sample_history.pop_front();
+            }
+
+            self.sample_history.push_back(sample);
+        }
+    }
+
     pub fn get_next_placements(
         &mut self,
         input: &Input,
@@ -183,7 +193,7 @@ impl GaussEstimator {
         } else {
             let mut mean: DVector<f32> = DVector::zeros(self.mean.len());
             let mut variance: DVector<f32> = DVector::zeros(self.mean.len());
-            let data_count = self.sample_history.len() as f32;
+            let data_count = (self.sample_history.len() * AVX2_U16_W) as f32;
 
             for rect in self.sample_history.iter() {
                 for rect_i in 0..self.rect_cnt {
@@ -200,6 +210,8 @@ impl GaussEstimator {
 
             mean /= data_count;
             variance = variance / data_count - mean.component_mul(&mean);
+
+            eprintln!("MEAN: {:?}", mean.iter().map(|v| v.round() as u32).collect_vec());
 
             (mean, variance)
         }

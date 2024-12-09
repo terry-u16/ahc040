@@ -52,24 +52,117 @@ impl MCMCSampler {
     }
 
     pub(crate) fn update(&mut self, observation: Observation2d) {
+        let test_obs = observation.clone();
+
         self.env.observations.push(observation);
         self.state.log_likelihood = unsafe { self.state.calc_log_likelihood(&self.env) };
-    }
 
-    pub(crate) fn sample(&mut self, duration: f64, rng: &mut impl Rng) -> SimdRectSet {
-        self.state = mcmc(&self.env, self.state.clone(), duration, rng)
-            .pop()
+        let mut base0 = test_obs
+            .operations
+            .iter()
+            .flat_map(|op| op.base())
+            .next()
             .unwrap();
+        let mut base1 = None;
+        let mut tgt1 = base0 + 1;
+        let mut tgt2 = None;
+        let mut idx1 = 0;
+        let mut idx2 = 0;
+        let mut last_left = None;
 
-        let mut heights = vec![];
-        let mut widths = vec![];
+        for (i, ob) in test_obs.operations.iter().enumerate() {
+            if let Some(b) = ob.base() {
+                if base1.is_none() && b != base0 {
+                    base1 = Some(b);
+                    tgt2 = last_left;
+                }
+            }
 
-        for (h, w) in izip!(&self.state.rect_h, &self.state.rect_w) {
-            heights.push(h.0);
-            widths.push(w.0);
+            if ob.rect_idx() == tgt1 {
+                idx1 = i;
+            }
+
+            if ob.dir() == Left {
+                last_left = Some(ob.rect_idx());
+                idx2 = i;
+            }
         }
 
-        SimdRectSet::new(heights, widths)
+        match tgt2 {
+            Some(tgt2) => {
+                let mut s = self.state.clone();
+                let tgt1_rot = test_obs.operations[idx1].rotate();
+                let tgt2_rot = test_obs.operations[idx2].rotate();
+                let like0 = unsafe { self.state.calc_log_likelihood(&self.env) };
+
+                let a = if tgt1_rot {
+                    s.rect_w[tgt1]
+                } else {
+                    s.rect_h[tgt1]
+                };
+                let b = if tgt2_rot {
+                    s.rect_w[tgt2]
+                } else {
+                    s.rect_h[tgt2]
+                };
+
+                if tgt1_rot {
+                    s.rect_w[tgt1] = b;
+                } else {
+                    s.rect_h[tgt1] = b;
+                }
+
+                if tgt2_rot {
+                    s.rect_w[tgt2] = a;
+                } else {
+                    s.rect_h[tgt2] = a;
+                }
+
+                let like1 = unsafe { s.calc_log_likelihood(&self.env) };
+
+                for i in 0..AVX2_U16_W {
+                    let (j, k) = (i / AVX2_F32_W, i % AVX2_F32_W);
+
+                    if like0[j].0[k] < like1[j].0[k] {
+                        if tgt1_rot {
+                            self.state.rect_w[tgt1] = b;
+                        } else {
+                            self.state.rect_h[tgt1] = b;
+                        }
+
+                        if tgt2_rot {
+                            self.state.rect_w[tgt2] = a;
+                        } else {
+                            self.state.rect_h[tgt2] = a;
+                        }
+                    }
+                }
+            }
+            _ => (),
+        };
+    }
+
+    pub(crate) fn sample(&mut self, duration: f64, rng: &mut impl Rng) -> Vec<SimdRectSet> {
+        eprintln!("{:?}", self.state.log_likelihood);
+        let states = mcmc(&self.env, self.state.clone(), duration, rng);
+        self.state = states.last().unwrap().clone();
+        eprintln!("{:?}", self.state.log_likelihood);
+
+        let mut samples = vec![];
+
+        for state in states {
+            let mut heights = vec![];
+            let mut widths = vec![];
+
+            for (h, w) in izip!(&state.rect_h, &state.rect_w) {
+                heights.push(h.0);
+                widths.push(w.0);
+            }
+
+            samples.push(SimdRectSet::new(heights, widths))
+        }
+
+        samples
     }
 
     unsafe fn dump_estimated(states: &[State], actual_rects: Option<&[Rect]>, rect_cnt: usize) {
@@ -271,7 +364,7 @@ impl State {
         let mut y0_buf = &mut y0_buf[..env.rect_cnt];
         let mut y1_buf = &mut y1_buf[..env.rect_cnt];
 
-        for observation in env.observations.iter() {
+        for (i, observation) in env.observations.iter().enumerate() {
             let (width, height) = if observation.is_2d {
                 self.pack_2d(
                     &observation.operations,
@@ -290,10 +383,24 @@ impl State {
                     .dedup()
                     .collect_vec();
 
-                let (base0, base1) = if bases.len() == 1 {
-                    (None, bases[0])
+                let (base0, base1, edge1) = if bases.len() == 1 {
+                    let edge1 = observation
+                        .operations
+                        .iter()
+                        .take_while(|op| op.base() != Some(bases[0]))
+                        .filter(|op| op.dir() == Left)
+                        .map(|op| op.rect_idx())
+                        .last();
+                    (None, Some(bases[0]), edge1)
                 } else {
-                    (Some(bases[0]), bases[1])
+                    let edge1 = observation
+                        .operations
+                        .iter()
+                        .take_while(|op| op.base() != Some(bases[1]))
+                        .filter(|op| op.dir() == Left)
+                        .map(|op| op.rect_idx())
+                        .last();
+                    (Some(bases[0]), Some(bases[1]), edge1)
                 };
 
                 self.pack_1d(
@@ -306,6 +413,7 @@ impl State {
                     &mut y1_buf,
                     base0,
                     base1,
+                    edge1,
                 )
             };
 
@@ -366,9 +474,10 @@ impl State {
         y0: &mut [AlignedU16],
         y1: &mut [AlignedU16],
         base0: Option<usize>,
-        base1: usize,
+        base1: Option<usize>,
+        edge1: Option<usize>,
     ) -> (AlignedU16, AlignedU16) {
-        const MAX_RECT_SIZE: u16 = round_u16(100000);
+        const MAX_RECT_SIZE: u16 = round_u16(Input::MAX_RECT_SIZE);
         let max_rect_size_x2 = _mm256_set1_epi16(MAX_RECT_SIZE as i16 * 2);
         let mut width = _mm256_setzero_si256();
         let mut height = _mm256_setzero_si256();
@@ -404,7 +513,7 @@ impl State {
             let rect_i = op.rect_idx();
 
             // 高さ試験のために横から投げ込むやつ
-            let is_height_tester = edge1_not_yet && op.base() == Some(base1);
+            let is_height_tester = edge1_not_yet && op.base() == base1;
 
             if flag == 0 && !is_height_tester {
                 // 座標がmax_rect_size以上なので衝突判定不要
@@ -467,6 +576,11 @@ impl State {
             // base0 == rect_index である場合、INFとしていたthreshold_yを更新
             // 併せて衝突判定用に座標も更新
             if Some(op.rect_idx()) == base0 {
+                let (rect_w, rect_h) = if op.rotate() {
+                    (rect_h, rect_w)
+                } else {
+                    (rect_w, rect_h)
+                };
                 x0[rect_i] = _mm256_setzero_si256().into();
                 x1[rect_i] = rect_w[rect_i];
                 y0[rect_i] = _mm256_sub_epi16(height, rect_h[rect_i].load()).into();
@@ -475,7 +589,7 @@ impl State {
             }
 
             // base1 == rect_index である場合、衝突判定用の座標を更新
-            if op.rect_idx() == base1 {
+            if Some(op.rect_idx()) == edge1 {
                 let base_y = match base0 {
                     Some(index) => y1[index].load(),
                     None => _mm256_setzero_si256(),
@@ -723,7 +837,8 @@ fn mcmc(env: &Env, mut state: State, duration: f64, rng: &mut impl Rng) -> Vec<S
             let (j, k) = (i / AVX2_F32_W, i % AVX2_F32_W);
             let prev_log_likelihood = state.log_likelihood[j].0[k];
 
-            if rng.gen_range(0.0..1.0) < (-(prev_log_likelihood - new_log_likelihood[j].0[k])).exp()
+            if rng.gen_range(0.0..1.0)
+                < (-(prev_log_likelihood - new_log_likelihood[j].0[k]) as f64).exp()
             {
                 accepted += 1;
                 state.log_likelihood[j].0[k] = new_log_likelihood[j].0[k];
