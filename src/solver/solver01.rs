@@ -25,50 +25,46 @@ impl Solver for Solver01 {
             estimator.update(Observation1d::single(input, rect.width(), i, true));
         }
 
+        let mut gauss_sampler = estimator.get_sampler();
+        let gauss_rects = gauss_sampler.sample(&mut rng);
+        let rect_std_dev = estimator.rect_std_dev();
+
+        let mut mcmc_sampler = mcmc::MCMCSampler::new(
+            input,
+            vec![],
+            gauss_rects.clone(),
+            rect_std_dev,
+            0.1,
+            &mut rng,
+            &mut judge,
+        );
+
         eprintln!("[Init]");
         estimator.dump_estimated(judge.rects());
 
         let arrange_trial_count = Params::get().borrow().arrange_count;
         let duration = Params::get().borrow().query_annealing_duration_sec
             / (input.query_cnt() - arrange_trial_count) as f64;
-        let mut observations = vec![];
 
         for _ in 0..input.query_cnt() - arrange_trial_count {
-            let (ops, edges_v, edges_h) = estimator::get_placements(input, &mut estimator, duration, &mut rng);
+            let (ops, edges_v, edges_h) =
+                estimator::get_placements(input, &mut estimator, duration, &mut rng);
             let measure = judge.query(&ops);
             let observation_x = Observation1d::new(measure.width(), edges_h);
             let observation_y = Observation1d::new(measure.height(), edges_v);
 
             estimator.update(observation_x);
             estimator.update(observation_y);
-            observations.push(Observation2d::new(
-                ops,
-                measure.width(),
-                measure.height(),
-                false,
-            ));
+            let observation = Observation2d::new(ops, measure.width(), measure.height(), false);
+            mcmc_sampler.update(observation);
+            mcmc_sampler.sample(0.0001, &mut rng);
         }
 
         eprintln!("[Final]");
         estimator.dump_estimated(judge.rects());
 
-        let mut gauss_sampler = estimator.get_sampler();
-
         let mut beam_arranger = MultiBeamArrangerSimd;
         let mut mcts_arranger = MCTSArranger;
-
-        let gauss_rects = gauss_sampler.sample(&mut rng);
-        let rect_std_dev = estimator.rect_std_dev();
-
-        let mut mcmc_sampler = mcmc::MCMCSampler::new(
-            input,
-            observations.clone(),
-            gauss_rects.clone(),
-            rect_std_dev,
-            Params::get().borrow().mcmc_init_duration_sec,
-            &mut rng,
-            &mut judge,
-        );
 
         for i in 0..arrange_trial_count {
             let remaining_arrange_count = arrange_trial_count - i;

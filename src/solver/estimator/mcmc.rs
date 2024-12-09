@@ -36,6 +36,7 @@ impl MCMCSampler {
             input.std_dev(),
             rect_std_dev,
         );
+
         let heights = rects.heights.iter().map(|&h| AlignedU16(h)).collect();
         let widths = rects.widths.iter().map(|&w| AlignedU16(w)).collect();
         let state = State::new(&env, widths, heights);
@@ -282,11 +283,18 @@ impl State {
                     &mut y1_buf,
                 )
             } else {
-                let base = observation
+                let bases = observation
                     .operations
                     .iter()
                     .flat_map(|op| op.base())
-                    .next();
+                    .dedup()
+                    .collect_vec();
+
+                let (base0, base1) = if bases.len() == 1 {
+                    (None, bases[0])
+                } else {
+                    (Some(bases[0]), bases[1])
+                };
 
                 self.pack_1d(
                     &observation.operations,
@@ -296,7 +304,8 @@ impl State {
                     &mut x1_buf,
                     &mut y0_buf,
                     &mut y1_buf,
-                    base,
+                    base0,
+                    base1,
                 )
             };
 
@@ -356,12 +365,14 @@ impl State {
         x1: &mut [AlignedU16],
         y0: &mut [AlignedU16],
         y1: &mut [AlignedU16],
-        base: Option<usize>,
+        base0: Option<usize>,
+        base1: usize,
     ) -> (AlignedU16, AlignedU16) {
         const MAX_RECT_SIZE: u16 = round_u16(100000);
         let max_rect_size_x2 = _mm256_set1_epi16(MAX_RECT_SIZE as i16 * 2);
         let mut width = _mm256_setzero_si256();
         let mut height = _mm256_setzero_si256();
+        let mut last_x = _mm256_setzero_si256();
 
         x0.fill(AlignedU16::default());
         x1.fill(AlignedU16::default());
@@ -371,10 +382,11 @@ impl State {
         // 座標がこれ以上になったら衝突判定をしなくても大丈夫という閾値
         // y座標はbase次第なので、baseが壁でない場合は0を入れる
         let threshold_x = max_rect_size_x2;
-        let mut threshold_y = match base {
+        let mut threshold_y = match base0 {
             Some(_) => _mm256_setzero_si256(),
             None => max_rect_size_x2,
         };
+        let mut edge1_not_yet = true;
 
         for &op in ops.iter() {
             // 全長方形がmax_rect_size以上ならば安全なので、頑張って判定
@@ -391,7 +403,10 @@ impl State {
             let flag = _mm256_movemask_epi8(ng);
             let rect_i = op.rect_idx();
 
-            if flag == 0 {
+            // 高さ試験のために横から投げ込むやつ
+            let is_height_tester = edge1_not_yet && op.base() == Some(base1);
+
+            if flag == 0 && !is_height_tester {
                 // 座標がmax_rect_size以上なので衝突判定不要
                 // 高さ、幅どちらを取るかビット演算で求める
                 // rotate_maskはrotateがtrueなら全て0、falseなら全て1
@@ -405,7 +420,7 @@ impl State {
                 // 0を足すかlenを足すかをマスク演算で分岐
                 let w_add = _mm256_andnot_si256(y_mask, len);
                 let h_add = _mm256_and_si256(y_mask, len);
-                width = _mm256_add_epi16(width, w_add);
+                last_x = _mm256_add_epi16(last_x, w_add);
                 height = _mm256_add_epi16(height, h_add);
             } else {
                 // 真面目に衝突判定をする
@@ -414,55 +429,72 @@ impl State {
 
                 match op.dir() {
                     Left => {
-                        let rect_h = rect_h[rect_i].load();
-                        let rect_w = rect_w[rect_i].load();
-                        let heights = &mut height;
-                        let widths = &mut width;
-
                         self.pack_one_2d(
                             op.base(),
                             rotate,
                             rect_i,
-                            rect_h,
-                            rect_w,
+                            rect_h[rect_i].load(),
+                            rect_w[rect_i].load(),
                             x0,
                             x1,
                             y0,
                             y1,
-                            heights,
-                            widths,
+                            &mut height,
+                            &mut last_x,
                         );
                     }
                     Up => {
                         // x, y座標を反転させる
-                        let (rect_h, rect_w) = (rect_w[rect_i].load(), rect_h[rect_i].load());
-                        let (heights, widths) = (&mut width, &mut height);
-
                         self.pack_one_2d(
                             op.base(),
                             rotate,
                             rect_i,
-                            rect_h,
-                            rect_w,
+                            rect_w[rect_i].load(),
+                            rect_h[rect_i].load(),
                             y0,
                             y1,
                             x0,
                             x1,
-                            heights,
-                            widths,
+                            &mut last_x,
+                            &mut height,
                         );
                     }
                 };
             }
 
-            // base == rect_index である場合、INFとしていたthreshold_yを更新
-            // 併せて衝突判定用にx0, x1, y1も更新
-            if Some(op.rect_idx()) == base {
+            width = _mm256_max_epi16(width, last_x);
+
+            // base0 == rect_index である場合、INFとしていたthreshold_yを更新
+            // 併せて衝突判定用に座標も更新
+            if Some(op.rect_idx()) == base0 {
                 x0[rect_i] = _mm256_setzero_si256().into();
                 x1[rect_i] = rect_w[rect_i];
                 y0[rect_i] = _mm256_sub_epi16(height, rect_h[rect_i].load()).into();
                 y1[rect_i] = height.into();
                 threshold_y = _mm256_add_epi16(height, max_rect_size_x2);
+            }
+
+            // base1 == rect_index である場合、衝突判定用の座標を更新
+            if op.rect_idx() == base1 {
+                let base_y = match base0 {
+                    Some(index) => y1[index].load(),
+                    None => _mm256_setzero_si256(),
+                };
+                let (rect_w, rect_h) = if op.rotate() {
+                    (rect_h, rect_w)
+                } else {
+                    (rect_w, rect_h)
+                };
+                x0[rect_i] = _mm256_sub_epi16(last_x, rect_w[rect_i].load()).into();
+                x1[rect_i] = last_x.into();
+                y0[rect_i] = base_y.into();
+                y1[rect_i] = _mm256_add_epi16(base_y, rect_h[rect_i].load()).into();
+            }
+
+            // 高さ試験のために横から投げ込むやつの場合、x座標を更新しなければならない
+            if is_height_tester {
+                last_x = x1[rect_i].load();
+                edge1_not_yet = false;
             }
         }
 
