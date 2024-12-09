@@ -7,7 +7,7 @@ import subprocess
 import optimize2
 import optuna
 
-OPT_PATH = "data/opt"
+OPT_PATH = "data/opt2"
 
 for iteration in range(1, 1000):
     start_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
