@@ -1,0 +1,10 @@
+{
+  "study_name": "ahc040-20241209_084347-group-3",
+  "n": 31,
+  "t": 49,
+  "sigma": 4412,
+  "params": {
+    "touching_threshold": 15,
+    "invalid_cnt_threshold": 1
+  }
+}
