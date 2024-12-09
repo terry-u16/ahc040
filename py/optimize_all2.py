@@ -4,7 +4,7 @@ import os
 import random
 import subprocess
 
-import optimize
+import optimize2
 import optuna
 
 OPT_PATH = "data/opt"
@@ -65,7 +65,7 @@ for iteration in range(1, 1000):
         }
     )
 
-    study.optimize(optimize.Objective(n, t, sigma), timeout=180)
+    study.optimize(optimize2.Objective(n, t, sigma), timeout=180)
 
     print(f"best params = {study.best_params}")
     print(f"best score  = {study.best_value}")
