@@ -42,7 +42,7 @@ for iteration in range(1, 1000):
         os.remove("./pahcer/best_scores.json")
 
     # ベストスコアを更新しておく
-    for _ in range(2):
+    for _ in range(1):
         cmd = [
             "pahcer",
             "run",
@@ -65,7 +65,7 @@ for iteration in range(1, 1000):
         }
     )
 
-    study.optimize(optimize.Objective(n, t, sigma), timeout=450)
+    study.optimize(optimize.Objective(n, t, sigma), timeout=180)
 
     print(f"best params = {study.best_params}")
     print(f"best score  = {study.best_value}")
