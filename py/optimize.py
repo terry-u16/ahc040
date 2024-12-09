@@ -6,42 +6,6 @@ import subprocess
 import optuna
 
 
-# TODO: Write parameter suggestions here
-def generate_params(trial: optuna.trial.Trial) -> dict[str, str]:
-    # for more information, see https://optuna.readthedocs.io/en/stable/reference/generated/optuna.trial.Trial.html
-    params = {
-        "AHC_ARRANGE_COUNT": str(trial.suggest_int("arrange_count", 5, 20)),
-        "AHC_QUERY_ANNEALING_DURATION_SEC": str(
-            trial.suggest_float("query_annealing_duration_sec", 0.05, 0.3)
-        ),
-        "AHC_MCMC_INIT_DURATION_SEC": str(
-            trial.suggest_float("mcmc_init_duration_sec", 0.05, 0.15)
-        ),
-        "AHC_BEAM_MCTS_DURATION_RATIO": str(
-            trial.suggest_float("beam_mcts_duration_ratio", 0.3, 0.7)
-        ),
-        "AHC_MCMC_DURATION_RATIO": str(
-            trial.suggest_float("mcmc_duration_ratio", 0.03, 0.2)
-        ),
-        "AHC_MCTS_TURN": str(trial.suggest_int("mcts_turn", 8, 20)),
-        "AHC_MCTS_EXPANSION_THRESHOLD": str(
-            trial.suggest_int("mcts_expansion_threshold", 1, 5)
-        ),
-        "AHC_MCTS_CANDIDATES_COUNT": str(
-            trial.suggest_int("mcts_candidates_count", 2, 6)
-        ),
-        "AHC_PARALLEL_SCORE_MUL": str(
-            trial.suggest_float("parallel_score_mul", 0.7, 1.0)
-        ),
-        "AHC_WIDTH_BUF": str(trial.suggest_float("width_buf", 1.02, 1.15)),
-        "AHC_UCB1_TUNED_COEF": str(
-            trial.suggest_float("ucb1_tuned_coef", 0.05, 1.0, log=True)
-        ),
-    }
-
-    return params
-
-
 # TODO: Customize the score extraction code here
 def extract_score(result: dict[str, str]) -> float:
     absolute_score = result["score"]  # noqa: F841
@@ -69,11 +33,13 @@ def run_optimization(study: optuna.study.Study) -> None:
 
 
 class Objective:
-    def __init__(self) -> None:
-        pass
+    def __init__(self, n: int, t: int, sigma: float) -> None:
+        self.n = n
+        self.t = t
+        self.sigma = sigma
 
     def __call__(self, trial: optuna.trial.Trial) -> float:
-        params = generate_params(trial)
+        params = self.generate_params(trial)
         env = os.environ.copy()
         env.update(params)
 
@@ -136,6 +102,43 @@ class Objective:
                     return sum(scores) / len(scores)
 
         return sum(scores) / len(scores)
+
+    def generate_params(self, trial: optuna.trial.Trial) -> dict[str, str]:
+        # for more information, see https://optuna.readthedocs.io/en/stable/reference/generated/optuna.trial.Trial.html
+        max_arrange_count = min(self.t - 1, min(20))
+        params = {
+            "AHC_ARRANGE_COUNT": str(
+                trial.suggest_int("arrange_count", 3, max_arrange_count)
+            ),
+            "AHC_QUERY_ANNEALING_DURATION_SEC": str(
+                trial.suggest_float("query_annealing_duration_sec", 0.05, 0.3)
+            ),
+            "AHC_MCMC_INIT_DURATION_SEC": str(
+                trial.suggest_float("mcmc_init_duration_sec", 0.05, 0.15)
+            ),
+            "AHC_BEAM_MCTS_DURATION_RATIO": str(
+                trial.suggest_float("beam_mcts_duration_ratio", 0.3, 0.7)
+            ),
+            "AHC_MCMC_DURATION_RATIO": str(
+                trial.suggest_float("mcmc_duration_ratio", 0.03, 0.2)
+            ),
+            "AHC_MCTS_TURN": str(trial.suggest_int("mcts_turn", 8, 20)),
+            "AHC_MCTS_EXPANSION_THRESHOLD": str(
+                trial.suggest_int("mcts_expansion_threshold", 1, 5)
+            ),
+            "AHC_MCTS_CANDIDATES_COUNT": str(
+                trial.suggest_int("mcts_candidates_count", 2, 6)
+            ),
+            "AHC_PARALLEL_SCORE_MUL": str(
+                trial.suggest_float("parallel_score_mul", 0.7, 1.0)
+            ),
+            "AHC_WIDTH_BUF": str(trial.suggest_float("width_buf", 1.02, 1.15)),
+            "AHC_UCB1_TUNED_COEF": str(
+                trial.suggest_float("ucb1_tuned_coef", 0.05, 1.0, log=True)
+            ),
+        }
+
+        return params
 
 
 if __name__ == "__main__":

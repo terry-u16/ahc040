@@ -22,7 +22,7 @@ pub struct Params {
 
 impl Params {
     pub(super) fn new(n: usize, t: usize, sigma: f64) -> Self {
-        let arrange_count = ParamSuggester::gen_arrange_count_pred()
+        let arrange_count = ParamSuggester::gen_arrange_count_pred(t)
             .suggest(n, t, sigma)
             .round() as usize;
         let query_annealing_duration_sec =
@@ -186,7 +186,7 @@ impl ParamSuggester {
         x_matrix
     }
 
-    pub fn gen_arrange_count_pred() -> Self {
+    pub fn gen_arrange_count_pred(t: usize) -> Self {
         let hyper_param = DVector::from_vec(decode_base64(PARAM_ARRANGE_COUNT));
         let y_vector = DVector::from_vec(decode_base64(ARRANGE_COUNT));
         Self::new(
@@ -195,7 +195,7 @@ impl ParamSuggester {
             y_vector,
             |x| x,
             5.0,
-            20.0,
+            (t - 1) as f64,
         )
     }
 
@@ -283,7 +283,7 @@ impl ParamSuggester {
             Self::gen_x_matrix(),
             y_vector,
             |x| x,
-            1.05,
+            1.02,
             1.15,
         )
     }
