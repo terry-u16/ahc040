@@ -1,0 +1,19 @@
+{
+  "study_name": "ahc040-20241209_075301-group-1",
+  "n": 82,
+  "t": 108,
+  "sigma": 7948,
+  "params": {
+    "arrange_count": 6,
+    "query_annealing_duration_sec": 0.26125865142982746,
+    "mcmc_init_duration_sec": 0.11324959170984367,
+    "beam_mcts_duration_ratio": 0.3047675154042542,
+    "mcmc_duration_ratio": 0.0571691589382721,
+    "mcts_turn": 21,
+    "mcts_expansion_threshold": 4,
+    "mcts_candidates_count": 3,
+    "parallel_score_mul": 0.9956231070321189,
+    "width_buf": 1.0899844398437744,
+    "ucb1_tuned_coef": 0.2312023316542468
+  }
+}
