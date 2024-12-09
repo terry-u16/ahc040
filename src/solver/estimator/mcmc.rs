@@ -359,7 +359,7 @@ impl State {
         base: Option<usize>,
     ) -> (AlignedU16, AlignedU16) {
         const MAX_RECT_SIZE: u16 = round_u16(100000);
-        let max_rect_size = _mm256_set1_epi16(MAX_RECT_SIZE as i16);
+        let max_rect_size_x2 = _mm256_set1_epi16(MAX_RECT_SIZE as i16 * 2);
         let mut width = _mm256_setzero_si256();
         let mut height = _mm256_setzero_si256();
 
@@ -370,10 +370,10 @@ impl State {
 
         // 座標がこれ以上になったら衝突判定をしなくても大丈夫という閾値
         // y座標はbase次第なので、baseが壁でない場合は0を入れる
-        let threshold_x = max_rect_size;
+        let threshold_x = max_rect_size_x2;
         let mut threshold_y = match base {
             Some(_) => _mm256_setzero_si256(),
-            None => max_rect_size,
+            None => max_rect_size_x2,
         };
 
         for &op in ops.iter() {
@@ -462,7 +462,7 @@ impl State {
                 x1[rect_i] = rect_w[rect_i];
                 y0[rect_i] = _mm256_sub_epi16(height, rect_h[rect_i].load()).into();
                 y1[rect_i] = height.into();
-                threshold_y = _mm256_add_epi16(height, max_rect_size);
+                threshold_y = _mm256_add_epi16(height, max_rect_size_x2);
             }
         }
 
@@ -641,10 +641,14 @@ impl Neighbor {
             let dist = Normal::new(0.0, std_dev).unwrap();
 
             delta[i] = loop {
-                let d = round_i16(dist.sample(rng).round() as i32);
+                let mut d = round_i16(dist.sample(rng).round() as i32);
                 let new_x = current.0[i].wrapping_add_signed(d);
 
-                if d != 0 && LOWER_BOUND <= new_x && new_x <= UPPER_BOUND {
+                if LOWER_BOUND <= new_x && new_x <= UPPER_BOUND {
+                    if d == 0 {
+                        d = if rng.gen_bool(0.5) { 1 } else { -1 };
+                    }
+
                     break d;
                 }
             }

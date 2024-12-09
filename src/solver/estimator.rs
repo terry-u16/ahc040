@@ -1,18 +1,20 @@
 pub mod gauss;
+pub mod gauss_minmax;
 pub mod mcmc;
 
 use super::simd::SimdRectSet;
-use crate::problem::Op;
-use gauss::GaussEstimator;
+use crate::problem::{Input, Op};
+use gauss_minmax::GaussEstimator;
 use nalgebra::DVector;
 use rand::prelude::*;
 
 pub(super) fn get_placements(
-    estimator: &GaussEstimator,
+    input: &Input,
+    estimator: &mut GaussEstimator,
     duration: f64,
     rng: &mut impl Rng,
-) -> (Vec<Op>, DVector<f64>, DVector<f64>) {
-    estimator.get_next_placements(duration, rng)
+) -> (Vec<Op>, DVector<f32>, DVector<f32>) {
+    estimator.get_next_placements(input, duration, rng)
 }
 
 #[derive(Debug, Clone, Copy)]

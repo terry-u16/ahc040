@@ -1,12 +1,13 @@
-use super::{
-    estimator::gauss::{GaussEstimator, Observation1d},
-    Solver,
-};
+use super::Solver;
 use crate::{
     problem::{params::Params, Input, Judge},
     solver::{
         arranger::{mcts::MCTSArranger, multi_beam_simd::MultiBeamArrangerSimd},
-        estimator::{self, mcmc, Observation2d, Sampler as _},
+        estimator::{
+            self,
+            gauss_minmax::{GaussEstimator, Observation1d},
+            mcmc, Observation2d, Sampler as _,
+        },
     },
 };
 use rand::SeedableRng;
@@ -33,7 +34,7 @@ impl Solver for Solver01 {
         let mut observations = vec![];
 
         for _ in 0..input.query_cnt() - arrange_trial_count {
-            let (ops, edges_v, edges_h) = estimator::get_placements(&estimator, duration, &mut rng);
+            let (ops, edges_v, edges_h) = estimator::get_placements(input, &mut estimator, duration, &mut rng);
             let measure = judge.query(&ops);
             let observation_x = Observation1d::new(measure.width(), edges_h);
             let observation_y = Observation1d::new(measure.height(), edges_v);
