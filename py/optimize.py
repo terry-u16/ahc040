@@ -106,6 +106,8 @@ class Objective:
     def generate_params(self, trial: optuna.trial.Trial) -> dict[str, str]:
         # for more information, see https://optuna.readthedocs.io/en/stable/reference/generated/optuna.trial.Trial.html
         max_arrange_count = min(self.t - 1, 20)
+        max_mcts_turn = min(self.t - 1, 20)
+
         params = {
             "AHC_ARRANGE_COUNT": str(
                 trial.suggest_int("arrange_count", 3, max_arrange_count)
@@ -122,7 +124,7 @@ class Objective:
             "AHC_MCMC_DURATION_RATIO": str(
                 trial.suggest_float("mcmc_duration_ratio", 0.03, 0.2)
             ),
-            "AHC_MCTS_TURN": str(trial.suggest_int("mcts_turn", 8, 20)),
+            "AHC_MCTS_TURN": str(trial.suggest_int("mcts_turn", 8, max_mcts_turn)),
             "AHC_MCTS_EXPANSION_THRESHOLD": str(
                 trial.suggest_int("mcts_expansion_threshold", 1, 5)
             ),
