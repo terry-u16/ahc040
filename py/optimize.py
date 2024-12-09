@@ -35,7 +35,7 @@ def generate_params(trial: optuna.trial.Trial) -> dict[str, str]:
         ),
         "AHC_WIDTH_BUF": str(trial.suggest_float("width_buf", 1.05, 1.15)),
         "AHC_UCB1_TUNED_COEF": str(
-            trial.suggest_float("ucb1_tuned_coef", 0.1, 1.0, log=True)
+            trial.suggest_float("ucb1_tuned_coef", 0.05, 1.0, log=True)
         ),
     }
 
@@ -64,7 +64,7 @@ def get_direction() -> str:
 
 # TODO: Set the timeout (seconds) or the number of trials
 def run_optimization(study: optuna.study.Study) -> None:
-    study.optimize(Objective(), timeout=600)
+    study.optimize(Objective(), timeout=450)
     # study.optimize(Objective(), n_trials=100)
 
 

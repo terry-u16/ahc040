@@ -42,7 +42,7 @@ for iteration in range(1, 1000):
         os.remove("./pahcer/best_scores.json")
 
     # ベストスコアを更新しておく
-    for _ in range(3):
+    for _ in range(2):
         cmd = [
             "pahcer",
             "run",
@@ -70,7 +70,7 @@ for iteration in range(1, 1000):
             "mcts_candidates_count": 4,
             "parallel_score_mul": 0.9,
             "width_buf": 1.1,
-            "ucb1_tuned_coef": 1.0,
+            "ucb1_tuned_coef": 0.5,
         }
     )
 
