@@ -580,7 +580,8 @@ impl State {
             }
         };
 
-        // ピッタリくっついていないものがあったらNG
+        // ピッタリくっついているものが閾値未満だったらNG
+        // 右シフトで0xffを0x01に変換してから足すことで個数をカウントできる
         let is_touching = _mm256_srli_epi16(is_touching, 15);
         let touching_count = horizontal_add_u16(is_touching) as usize;
 
@@ -681,7 +682,7 @@ impl State {
                 let next_x = _mm256_add_epi16(new_x1, min_rect_size);
                 let invalid_width_limit = _mm256_cmpgt_epi16(next_x, width_limit);
 
-                // invalidなものが1つでもあったらNG
+                // invalidなものが閾値を超えていたらNG
                 let invalid = _mm256_or_si256(invalid_base, invalid_width_limit);
                 let invalid = _mm256_and_si256(pred_y, invalid);
                 let invalid = _mm256_srli_epi16(invalid, 15);

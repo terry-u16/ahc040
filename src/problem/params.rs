@@ -45,8 +45,10 @@ impl Params {
             ParamSuggester::gen_parallel_score_mul().suggest(n, t, sigma) as f32;
         let width_buf = ParamSuggester::gen_width_buf().suggest(n, t, sigma);
         let ucb1_tuned_coef = ParamSuggester::gen_ucb1_tuned_coef().suggest(n, t, sigma) as f32;
-        let touching_threshold = get_env("AHC_TOUCHING_THRESHOLD", 16);
-        let invalid_cnt_threshold = get_env("AHC_INVALID_CNT_THRESHOLD", 0);
+        let touching_threshold =
+            ParamSuggester::gen_touching_threshold().suggest(n, t, sigma) as usize;
+        let invalid_cnt_threshold =
+            ParamSuggester::gen_invalid_cnt_threshold().suggest(n, t, sigma) as usize;
 
         Self {
             arrange_count,
@@ -127,13 +129,16 @@ impl Display for Params {
         writeln!(f, "mcts_candidates_count: {}", self.mcts_candidates_count)?;
         writeln!(f, "parallel_score_mul: {}", self.parallel_score_mul)?;
         writeln!(f, "width_buf: {}", self.width_buf)?;
-        writeln!(f, "ucb1_tuned_coef: {}", self.ucb1_tuned_coef)
+        writeln!(f, "ucb1_tuned_coef: {}", self.ucb1_tuned_coef)?;
+        writeln!(f, "touching_threshold: {}", self.touching_threshold)?;
+        writeln!(f, "invalid_cnt_threshold: {}", self.invalid_cnt_threshold)
     }
 }
 
-const N: &[u8] = b"Fl/xFV/xtT8d1EEd1EGtP8VXfMVXfOU/6qAO6qAO6j/btm3btm3bP8VXfMVXfOU/fMVXfMVX3D+amZmZmZm5P9u2bdu2bcs/JUmSJEmS5D9CHdRBHdThP6EO6qAO6uA/HdRBHdRB7T+w+Iqv+IrvP83MzMzMzOw/kiRJkiRJ0j+w+Iqv+IrvPzuogzqog+o/HdRBHdRBrT9YfMVXfMXXP+qgDuqgDuo/LL7iK77i6z+3bdu2bdvmP/EVX/EVX+E/mpmZmZmZ2T9YfMVXfMXnP5qZmZmZmek/kiRJkiRJwj9mZmZmZmbmPxZf8RVf8cU/hDqogzqo4z9YfMVXfMXXP5IkSZIkSdI/HdRBHdRBvT+hDuqgDurgP4uv+Iqv+Oo/6qAO6qAO6j/UQR3UQR3EP7dt27Zt2+Y/X/EVX/EVzz9QB3VQB3XgP5IkSZIkScI/+Yqv+Iqv6D+SJEmSJEniPzMzMzMzM9M/UAd1UAd1wD9QB3VQB3XgP1/xFV/xFe8/fMVXfMVX7D+SJEmSJEmyP7dt27Zt29Y/UAd1UAd1wD8AAAAAAADgP/EVX/EVX+E/MzMzMzMz4z+amZmZmZm5PzMzMzMzM9M/O6iDOqiD2j/btm3btm3rP1h8xVd8xdc/27Zt27Zt6z+amZmZmZnJP27btm3btu0/dVAHdVAH5T8P6qAO6qDuP1AHdVAHddA/mpmZmZmZuT9u27Zt27btP/EVX/EVX9E/mpmZmZmZyT+SJEmSJEniP4Q6qIM6qOM/X/EVX/EVzz++4iu+4ivuPw==";
-const T: &[u8] = b"k2DD4m+s3L/CU5lGkvrqP80YAXd+r8W/cRodhGTk6z8sPbRVMqrgP2iapt7KPNM/Yw21Xila3D8Em7cuz03lPwj8awCFXd6/G+rBNVJ58D+R2zQRYmnSP51eEMEtmPM/ktkJmojJ6z+SFkS7i6rhvzbGmVqqpcY/zG2Yr7Gu2L+uNzc+ZtzkP+TgEmghmLM/9RMjIAvG8D9vZP8B3OfQvygzznoMis+/RiLz124I7z94Ogl+RizQPwj+72zOj8E/TJi/7CPz2T/xNZuRWaDRP73c1BJlut4/zyYnGooU3j/J9fkmOavgP4CzUUeIhO4/2Efx9osP5L8RCCR1Evnjv/EWsxbOl9q/2zaZ1o5J2L//3DL2WHSnv6+GlbQTPNm/lG83Uro12T+XrRZk8v3Tv8rErlDUgus/CwOteuqT8T/ikQx8hZ/zPz4ZzFsdQ6q/ZuArt+Y09D9Zsb9wcYPhP7a5uMOIdsA/X8ebsdX+uD+sZw8zuA/Tv480E9nCiOW/mpxHhUSk8z9kAi00kYzjv0wbO1FUBe8/iyHFFQF/5D+LpH8DjgHpP5p2sFND7vI/ziYnGooU3r8v49gy7KzoP0tV3qR4798/ixIJnuI1kT9RFIH6rljwP/PaJj4MlOc/TPQM95R27T8bivukYcKmP2a/WDWPsPE/r1Rt+c9zsz9VxQTNEs7gP+PZijztk8q/Pv5lGQOF4j9cu1r9CFnWv9flxxbB9+0/K52o6XZl47/RQHBeX+jhv51IDnlLGOg/v8g5jxue4D/CXhzCi2HUPw==";
-const SIGMA: &[u8] = b"FBtVwmI25T/NhaQpFWfrP3BeTTwrGu0/buydgprl2z+ASXkPDG/oP5vlYxX6Ea0/bJsxLpFa5j/SlIqzD5/lP452K637Ftc/LR+r0I/o2j/fT42XbhLjP5KmVJx9+Ow/cWPvFNQs6z9TKs4+fIbVPzhCGb0ta+0/d3d3d3d36z/45tXEs6LBP5aPVehHdO0/q9CP6Npm6D/ZqBIWs+nlP+ZjFfoRXcs/XI/C9Shc1z9eJ1ft6UzeP+HBPFH/Ruw/VqEf0bXNqD9OYhBYObToP02pOPvwGbY/ltZ9i//Z0j+/WPKLJb/YPzn78Bl2Bcg/tA+fYVeAzD/n+6nx0k3SPxtVwmI2Pe8/xI29U1CzvD8LtmALtmDTP+MSqaUI0u0/+hFd24xx7T/vgeENB83nP1S9wF2UZOY/kceXAQWi2D92Bci95kKiPwu2YAu2YO8/wYN5ov6N2D/iM+wKkHvNPxyhjN6WteI/4C5KMudo4z967sgJsb7CP7lqT2eyMNI/lKv2dCYL6z+BuyjJnKPdP2So7DB1ue0/sEyDU73AvT/MpueOnBDjP4Y3HDR//dY/2vTckRNi6T+uR+F6FK7fP+mTPumTPtE/ZRqc6gXu7j9GtvP91HjRPz5WoR/RtdU/juM4juM43j+grSH8POTlP8CkvAeGN9Q/v+vkqj2d7T+W1n2L/9mKP+sr0+BUL+w/pHA9Ctej4D9y1Z7OZGHUP7Q1hJ+HPOo/rPZ0Jgsjzj9d24xxidTaPyfE+so0OMU/xPrKNDjV0z/xrGgk4JvnPw==";
+// パラメータチューニングその1
+const N1: &[u8] = b"Fl/xFV/xtT8d1EEd1EGtP8VXfMVXfOU/6qAO6qAO6j/btm3btm3bP8VXfMVXfOU/fMVXfMVX3D+amZmZmZm5P9u2bdu2bcs/JUmSJEmS5D9CHdRBHdThP6EO6qAO6uA/HdRBHdRB7T+w+Iqv+IrvP83MzMzMzOw/kiRJkiRJ0j+w+Iqv+IrvPzuogzqog+o/HdRBHdRBrT9YfMVXfMXXP+qgDuqgDuo/LL7iK77i6z+3bdu2bdvmP/EVX/EVX+E/mpmZmZmZ2T9YfMVXfMXnP5qZmZmZmek/kiRJkiRJwj9mZmZmZmbmPxZf8RVf8cU/hDqogzqo4z9YfMVXfMXXP5IkSZIkSdI/HdRBHdRBvT+hDuqgDurgP4uv+Iqv+Oo/6qAO6qAO6j/UQR3UQR3EP7dt27Zt2+Y/X/EVX/EVzz9QB3VQB3XgP5IkSZIkScI/+Yqv+Iqv6D+SJEmSJEniPzMzMzMzM9M/UAd1UAd1wD9QB3VQB3XgP1/xFV/xFe8/fMVXfMVX7D+SJEmSJEmyP7dt27Zt29Y/UAd1UAd1wD8AAAAAAADgP/EVX/EVX+E/MzMzMzMz4z+amZmZmZm5PzMzMzMzM9M/O6iDOqiD2j/btm3btm3rP1h8xVd8xdc/27Zt27Zt6z+amZmZmZnJP27btm3btu0/dVAHdVAH5T8P6qAO6qDuP1AHdVAHddA/mpmZmZmZuT9u27Zt27btP/EVX/EVX9E/mpmZmZmZyT+SJEmSJEniP4Q6qIM6qOM/X/EVX/EVzz++4iu+4ivuPw==";
+const T1: &[u8] = b"k2DD4m+s3L/CU5lGkvrqP80YAXd+r8W/cRodhGTk6z8sPbRVMqrgP2iapt7KPNM/Yw21Xila3D8Em7cuz03lPwj8awCFXd6/G+rBNVJ58D+R2zQRYmnSP51eEMEtmPM/ktkJmojJ6z+SFkS7i6rhvzbGmVqqpcY/zG2Yr7Gu2L+uNzc+ZtzkP+TgEmghmLM/9RMjIAvG8D9vZP8B3OfQvygzznoMis+/RiLz124I7z94Ogl+RizQPwj+72zOj8E/TJi/7CPz2T/xNZuRWaDRP73c1BJlut4/zyYnGooU3j/J9fkmOavgP4CzUUeIhO4/2Efx9osP5L8RCCR1Evnjv/EWsxbOl9q/2zaZ1o5J2L//3DL2WHSnv6+GlbQTPNm/lG83Uro12T+XrRZk8v3Tv8rErlDUgus/CwOteuqT8T/ikQx8hZ/zPz4ZzFsdQ6q/ZuArt+Y09D9Zsb9wcYPhP7a5uMOIdsA/X8ebsdX+uD+sZw8zuA/Tv480E9nCiOW/mpxHhUSk8z9kAi00kYzjv0wbO1FUBe8/iyHFFQF/5D+LpH8DjgHpP5p2sFND7vI/ziYnGooU3r8v49gy7KzoP0tV3qR4798/ixIJnuI1kT9RFIH6rljwP/PaJj4MlOc/TPQM95R27T8bivukYcKmP2a/WDWPsPE/r1Rt+c9zsz9VxQTNEs7gP+PZijztk8q/Pv5lGQOF4j9cu1r9CFnWv9flxxbB9+0/K52o6XZl47/RQHBeX+jhv51IDnlLGOg/v8g5jxue4D/CXhzCi2HUPw==";
+const SIGMA1: &[u8] = b"FBtVwmI25T/NhaQpFWfrP3BeTTwrGu0/buydgprl2z+ASXkPDG/oP5vlYxX6Ea0/bJsxLpFa5j/SlIqzD5/lP452K637Ftc/LR+r0I/o2j/fT42XbhLjP5KmVJx9+Ow/cWPvFNQs6z9TKs4+fIbVPzhCGb0ta+0/d3d3d3d36z/45tXEs6LBP5aPVehHdO0/q9CP6Npm6D/ZqBIWs+nlP+ZjFfoRXcs/XI/C9Shc1z9eJ1ft6UzeP+HBPFH/Ruw/VqEf0bXNqD9OYhBYObToP02pOPvwGbY/ltZ9i//Z0j+/WPKLJb/YPzn78Bl2Bcg/tA+fYVeAzD/n+6nx0k3SPxtVwmI2Pe8/xI29U1CzvD8LtmALtmDTP+MSqaUI0u0/+hFd24xx7T/vgeENB83nP1S9wF2UZOY/kceXAQWi2D92Bci95kKiPwu2YAu2YO8/wYN5ov6N2D/iM+wKkHvNPxyhjN6WteI/4C5KMudo4z967sgJsb7CP7lqT2eyMNI/lKv2dCYL6z+BuyjJnKPdP2So7DB1ue0/sEyDU73AvT/MpueOnBDjP4Y3HDR//dY/2vTckRNi6T+uR+F6FK7fP+mTPumTPtE/ZRqc6gXu7j9GtvP91HjRPz5WoR/RtdU/juM4juM43j+grSH8POTlP8CkvAeGN9Q/v+vkqj2d7T+W1n2L/9mKP+sr0+BUL+w/pHA9Ctej4D9y1Z7OZGHUP7Q1hJ+HPOo/rPZ0Jgsjzj9d24xxidTaPyfE+so0OMU/xPrKNDjV0z/xrGgk4JvnPw==";
 const ARRANGE_COUNT: &[u8] = b"AAAAAAAAKEAAAAAAAAAiQAAAAAAAACBAAAAAAAAAKEAAAAAAAAAoQAAAAAAAABhAAAAAAAAAJkAAAAAAAAAmQAAAAAAAACRAAAAAAAAAJEAAAAAAAAAUQAAAAAAAACJAAAAAAAAAJEAAAAAAAAAkQAAAAAAAABRAAAAAAAAAIEAAAAAAAAAcQAAAAAAAABRAAAAAAAAAGEAAAAAAAAAcQAAAAAAAABhAAAAAAAAAIkAAAAAAAAAcQAAAAAAAABxAAAAAAAAAHEAAAAAAAAAYQAAAAAAAACBAAAAAAAAAGEAAAAAAAAAmQAAAAAAAABhAAAAAAAAAIEAAAAAAAAAmQAAAAAAAACRAAAAAAAAAGEAAAAAAAAAiQAAAAAAAABxAAAAAAAAAJEAAAAAAAAAiQAAAAAAAACZAAAAAAAAAJkAAAAAAAAAgQAAAAAAAABhAAAAAAAAAIkAAAAAAAAAgQAAAAAAAABxAAAAAAAAAGEAAAAAAAAAgQAAAAAAAABxAAAAAAAAAIkAAAAAAAAAmQAAAAAAAACxAAAAAAAAAIEAAAAAAAAAiQAAAAAAAACJAAAAAAAAAGEAAAAAAAAAYQAAAAAAAACRAAAAAAAAAHEAAAAAAAAAgQAAAAAAAACJAAAAAAAAAKEAAAAAAAAAUQAAAAAAAACBAAAAAAAAAGEAAAAAAAAAYQAAAAAAAACRAAAAAAAAAGEAAAAAAAAAcQAAAAAAAACJAAAAAAAAAJkAAAAAAAAAkQAAAAAAAACxAAAAAAAAAGEAAAAAAAAAoQA==";
 const QUERY_ANNEALING_DURATION_SEC: &[u8] = b"95Ax5HV6uz+3nNK9X8nOP6+Jp+1vPsM/8Z35ADfkzz81Wvg+2CzTP8OVCxg25sQ/vHuCZ4ks0D/TCxE5KYvGPzMzMzMzM9M/7Bdt7yu1wD8qLNiB7PDHP1bxcEKBgMo/9FFvDmzZzj8+CvboZyTGP9e20LPpps4/91pqZ50SxD9Y1BNo1ZvRP4YswqmhjNA/Dg7xZMCpwT/Y0/SeXUixPzpZhzJs5sg/cgXTCFsGxj9F+ZmeXg3EP1pmguSRfsw/7uB5HK3pyz8FC+w0drjQPx0CRSC26sk/wuvkd5gazj//deaVL9PGP73g1UI43bc/VpLUTGhZzj/ZdzaXJzDJP9ioFYvi/sI/lhvwSFUUxj/0o2dmntjDPweMqrc+l6s/CjDJjdBA0T/aKEeigMPSP89BEJPe6s8/WahZoGRwsz9jals8llWtPx67V3qUTr4/zBrTzQPnzz9YjBMe6HvSP2IEKEEUt9E/1R0pElKG0j+ajEe+hyq7P1cVEKGEic0/SnsNoo7U0D8uSWeXbx+6P36tw90I0bs/NMWh/G5Wzj+OG0vxkSzOP52BphNFOcQ/CIZpPYUYwz9FcvPt6VXKP0A78trSXNE/GkAgin5v0T/QLFzG0u7DP7CF+l1XXsc/P2Z9DtHEtj/px5df4ce2Py80Kc9UX9A/ys5mmUZ00D+nk5QbmXrOPzMzMzMzM9M/Ila+UBDBzD+87emTYL7QP8qFPN6sFMg/AUybWbRGrj/KWocZz3zBP+I3brKyc7E/sU1IqXZ+zj+YgVDeSbjOPw==";
 const MCMC_INIT_DURATION_SEC: &[u8] = b"ScJ8YM4psT/tiBZJzAO1P95kK0vp+Lg/hHAk6uejwj+GM/ppmRDDP/mO2FYjpa0/H3LT0KcXsT+T3LXX4neyP5qZmZmZmbk/1qQ4gi/Brj837NwNXL+2PyuN1iDBSb0/YC4zKvUFwj9sS6fzPE+4PwugocifsLY/Cc+W9IaptT/hs8Apu5uwPxEyelGDGbw/X2dHaC+QwD/gw5mNkXK2P9W2kz7xKcA/XsE4GHxdtD+6W3DJswaxP4WCsGULnbg/vSuxHGQCuD+M263c7P28PzHSjy4cYLg/v83e5/ZrvD8uYDZZpQ++P8sVK0jZzrs/ZwGSG9musT+SGcpMoFW6P1Td1zhgarQ/nZwCByRNrj+T4Tx3Zzq1P+nPDyITB68/xB1QdS+BtD+iQI3qDGWxP/UazHkynMI/z6FArLIQsj+P+24KSayzP8tWUETXJro/qOAjVBsBvT/AuPqgDGe2P4xovpqkT8E/nuQCBXmyuj9mHdtszXOwP9J7WP7nV7A/RIAUs08dsD+ySDg2wrG7P695WTnZm7M/BEWKB2d0wj+AnfkMLBW4P/EagZ8tA8A/VWO0Be3kuj9FnXssE8C4P+AU82HfdrM/PoSVHd1Ztz9QEdVNygXAP2IJjvsOAMM/cHN14eh+wT+x31ZMqZiyP1wWaoXD6cE/eKf9+IsRwj9JjbHRRnW0P5qZmZmZmbk/eY8/Axvluz8QXz8+hrC6Pwt9LNwHX7o/Wv6XZ+l4vz/9Nl/mLxCxP8tl37tvArU/zeqq3llTvD+sBfsJGLq/Pw==";
@@ -156,6 +161,15 @@ const PARAM_MCTS_CANDIDATES_COUNT: &[u8] = b"i4Q0dFZzhz/Hz4A2vy/QP65UrBlRXcA/NU+
 const PARAM_PARALLEL_SCORE_MUL: &[u8] = b"WrcOSSP4hD/mENpZ046EP9NDoYc4Wu8/8dfS3NuQhD8=";
 const PARAM_WIDTH_BUF: &[u8] = b"QCLB65GMhj/N8DHQy/mLP5d6NK2Hw+w/VqFp6Bp+hD8=";
 const PARAM_UCB1_TUNED_COEF: &[u8] = b"+GmSQpB9jD/hPYjWRKmEP23WXKJNVdI/4gh3743KoD8=";
+
+// パラメータチューニングその2
+const N2: &[u8] = b"mpmZmZmZ2T+SJEmSJEnCPyy+4iu+4us/X/EVX/EVzz8d1EEd1EGtP5IkSZIkSdI/HdRBHdRBjT9f8RVf8RXPPzMzMzMzM9M/1EEd1EEd1D8=";
+const T2: &[u8] = b"uLm4w4h2wL+Md2WPDvnxPwoz8vcP+/A/WicKmZpV4z+oYhHAMAqvv4xfcwPXA+w/6ncJLSNN3T+veJu1ES7cP6I/9/f54OI/xsf+QCsG0z8=";
+const SIGMA2: &[u8] = b"FK5H4XoU1j/Gkl8s+cWSPz1R/0Yoo+8/PVH/Riijtz/ZqBIWs+ntP+Psw2fYFcA/u2/xP1tD2D9xY+8U1CznPxMWs+m5I9c/u9z+IENl1z8=";
+const TOUCHING_THRESHOLD: &[u8] = b"AAAAAAAALEAAAAAAAAAwQAAAAAAAACpAAAAAAAAAKkAAAAAAAAAuQAAAAAAAACxAAAAAAAAALkAAAAAAAAAwQAAAAAAAADBAAAAAAAAALEA=";
+const INVALID_CNT_THRESHOLD: &[u8] = b"AAAAAAAA8D8AAAAAAAAIQAAAAAAAAABAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+const PARAM_TOUCHING_THRESHOLD: &[u8] = b"74kcIv2WhD9JRwZppGXwP+mNMIRHJ4Y/tawKTt0AzD8=";
+const PARAM_INVALID_CNT_THRESHOLD: &[u8] = b"uArHZjCJhD9D2VENXISEP4HNJiNj5Z8//7FMyc/78D8=";
 
 pub struct ParamSuggester {
     x_matrix: DMatrix<f64>,
@@ -185,10 +199,20 @@ impl ParamSuggester {
         }
     }
 
-    fn gen_x_matrix() -> DMatrix<f64> {
-        let n = DVector::from_vec(decode_base64(N)).transpose();
-        let t = DVector::from_vec(decode_base64(T)).transpose();
-        let sigma = DVector::from_vec(decode_base64(SIGMA)).transpose();
+    fn gen_x1_matrix() -> DMatrix<f64> {
+        let n = DVector::from_vec(decode_base64(N1)).transpose();
+        let t = DVector::from_vec(decode_base64(T1)).transpose();
+        let sigma = DVector::from_vec(decode_base64(SIGMA1)).transpose();
+
+        let x_matrix = DMatrix::from_rows(&[n, t, sigma]);
+
+        x_matrix
+    }
+
+    fn gen_x2_matrix() -> DMatrix<f64> {
+        let n = DVector::from_vec(decode_base64(N2)).transpose();
+        let t = DVector::from_vec(decode_base64(T2)).transpose();
+        let sigma = DVector::from_vec(decode_base64(SIGMA2)).transpose();
 
         let x_matrix = DMatrix::from_rows(&[n, t, sigma]);
 
@@ -200,7 +224,7 @@ impl ParamSuggester {
         let y_vector = DVector::from_vec(decode_base64(ARRANGE_COUNT));
         Self::new(
             hyper_param,
-            Self::gen_x_matrix(),
+            Self::gen_x1_matrix(),
             y_vector,
             |x| x,
             5.0,
@@ -213,7 +237,7 @@ impl ParamSuggester {
         let y_vector = DVector::from_vec(decode_base64(QUERY_ANNEALING_DURATION_SEC));
         Self::new(
             hyper_param,
-            Self::gen_x_matrix(),
+            Self::gen_x1_matrix(),
             y_vector,
             |x| x,
             0.05,
@@ -226,7 +250,7 @@ impl ParamSuggester {
         let y_vector = DVector::from_vec(decode_base64(MCMC_INIT_DURATION_SEC));
         Self::new(
             hyper_param,
-            Self::gen_x_matrix(),
+            Self::gen_x1_matrix(),
             y_vector,
             |x| x,
             0.05,
@@ -237,7 +261,14 @@ impl ParamSuggester {
     pub fn gen_beam_mcts_duration_ratio() -> Self {
         let hyper_param = DVector::from_vec(decode_base64(PARAM_BEAM_MCTS_DURATION_RATIO));
         let y_vector = DVector::from_vec(decode_base64(BEAM_MCTS_DURATION_RATIO));
-        Self::new(hyper_param, Self::gen_x_matrix(), y_vector, |x| x, 0.3, 0.7)
+        Self::new(
+            hyper_param,
+            Self::gen_x1_matrix(),
+            y_vector,
+            |x| x,
+            0.3,
+            0.7,
+        )
     }
 
     pub fn gen_mcmc_duration_ratio() -> Self {
@@ -245,7 +276,7 @@ impl ParamSuggester {
         let y_vector = DVector::from_vec(decode_base64(MCMC_DURATION_RATIO));
         Self::new(
             hyper_param,
-            Self::gen_x_matrix(),
+            Self::gen_x1_matrix(),
             y_vector,
             |x| x,
             0.03,
@@ -258,7 +289,7 @@ impl ParamSuggester {
         let y_vector = DVector::from_vec(decode_base64(MCTS_TURN));
         Self::new(
             hyper_param,
-            Self::gen_x_matrix(),
+            Self::gen_x1_matrix(),
             y_vector,
             |x| x,
             0.8,
@@ -269,19 +300,40 @@ impl ParamSuggester {
     pub fn gen_mcts_expansion_threshold() -> Self {
         let hyper_param = DVector::from_vec(decode_base64(PARAM_MCTS_EXPANSION_THRESHOLD));
         let y_vector = DVector::from_vec(decode_base64(MCTS_EXPANSION_THRESHOLD));
-        Self::new(hyper_param, Self::gen_x_matrix(), y_vector, |x| x, 1.0, 5.0)
+        Self::new(
+            hyper_param,
+            Self::gen_x1_matrix(),
+            y_vector,
+            |x| x,
+            1.0,
+            5.0,
+        )
     }
 
     pub fn gen_mcts_candidates_count() -> Self {
         let hyper_param = DVector::from_vec(decode_base64(PARAM_MCTS_CANDIDATES_COUNT));
         let y_vector = DVector::from_vec(decode_base64(MCTS_CANDIDATES_COUNT));
-        Self::new(hyper_param, Self::gen_x_matrix(), y_vector, |x| x, 2.0, 6.0)
+        Self::new(
+            hyper_param,
+            Self::gen_x1_matrix(),
+            y_vector,
+            |x| x,
+            2.0,
+            6.0,
+        )
     }
 
     pub fn gen_parallel_score_mul() -> Self {
         let hyper_param = DVector::from_vec(decode_base64(PARAM_PARALLEL_SCORE_MUL));
         let y_vector = DVector::from_vec(decode_base64(PARALLEL_SCORE_MUL));
-        Self::new(hyper_param, Self::gen_x_matrix(), y_vector, |x| x, 0.7, 1.0)
+        Self::new(
+            hyper_param,
+            Self::gen_x1_matrix(),
+            y_vector,
+            |x| x,
+            0.7,
+            1.0,
+        )
     }
 
     pub fn gen_width_buf() -> Self {
@@ -289,7 +341,7 @@ impl ParamSuggester {
         let y_vector = DVector::from_vec(decode_base64(WIDTH_BUF));
         Self::new(
             hyper_param,
-            Self::gen_x_matrix(),
+            Self::gen_x1_matrix(),
             y_vector,
             |x| x,
             1.02,
@@ -302,11 +354,37 @@ impl ParamSuggester {
         let y_vector = DVector::from_vec(decode_base64(UCB1_TUNED_COEF));
         Self::new(
             hyper_param,
-            Self::gen_x_matrix(),
+            Self::gen_x1_matrix(),
             y_vector,
             |x| x,
             0.05,
             1.0,
+        )
+    }
+
+    fn gen_touching_threshold() -> Self {
+        let hyper_param = DVector::from_vec(decode_base64(PARAM_TOUCHING_THRESHOLD));
+        let y_vector = DVector::from_vec(decode_base64(TOUCHING_THRESHOLD));
+        Self::new(
+            hyper_param,
+            Self::gen_x2_matrix(),
+            y_vector,
+            |x| x,
+            12.0,
+            16.0,
+        )
+    }
+
+    fn gen_invalid_cnt_threshold() -> Self {
+        let hyper_param = DVector::from_vec(decode_base64(PARAM_INVALID_CNT_THRESHOLD));
+        let y_vector = DVector::from_vec(decode_base64(INVALID_CNT_THRESHOLD));
+        Self::new(
+            hyper_param,
+            Self::gen_x2_matrix(),
+            y_vector,
+            |x| x,
+            0.0,
+            3.0,
         )
     }
 
