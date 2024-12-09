@@ -65,7 +65,7 @@ for iteration in range(1, 1000):
         }
     )
 
-    study.optimize(optimize2.Objective(n, t, sigma), timeout=180)
+    study.optimize(optimize2.Objective(n, t, sigma), timeout=120)
 
     print(f"best params = {study.best_params}")
     print(f"best score  = {study.best_value}")
