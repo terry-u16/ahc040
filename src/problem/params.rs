@@ -18,6 +18,8 @@ pub struct Params {
     pub parallel_score_mul: f32,
     pub width_buf: f64,
     pub ucb1_tuned_coef: f32,
+    pub touching_threshold: usize,
+    pub invalid_cnt_threshold: usize,
 }
 
 impl Params {
@@ -43,6 +45,8 @@ impl Params {
             ParamSuggester::gen_parallel_score_mul().suggest(n, t, sigma) as f32;
         let width_buf = ParamSuggester::gen_width_buf().suggest(n, t, sigma);
         let ucb1_tuned_coef = ParamSuggester::gen_ucb1_tuned_coef().suggest(n, t, sigma) as f32;
+        let touching_threshold = get_env("AHC_TOUCHING_THRESHOLD", 16);
+        let invalid_cnt_threshold = get_env("AHC_INVALID_CNT_THRESHOLD", 0);
 
         Self {
             arrange_count,
@@ -56,6 +60,8 @@ impl Params {
             parallel_score_mul,
             width_buf,
             ucb1_tuned_coef,
+            touching_threshold,
+            invalid_cnt_threshold,
         }
     }
 
@@ -72,6 +78,8 @@ impl Params {
         let parallel_score_mul = get_env("AHC_PARALLEL_SCORE_MUL", 0.9);
         let width_buf = get_env("AHC_WIDTH_BUF", 1.1);
         let ucb1_tuned_coef = get_env("AHC_UCB1_TUNED_COEF", 1.0);
+        let touching_threshold = get_env("AHC_TOUCHING_THRESHOLD", 16);
+        let invalid_cnt_threshold = get_env("AHC_INVALID_CNT_THRESHOLD", 10);
 
         Self {
             arrange_count,
@@ -85,6 +93,8 @@ impl Params {
             parallel_score_mul,
             width_buf,
             ucb1_tuned_coef,
+            touching_threshold,
+            invalid_cnt_threshold,
         }
     }
 

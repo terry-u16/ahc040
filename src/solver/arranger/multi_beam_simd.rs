@@ -437,9 +437,10 @@ impl ActGen {
         };
 
         // ピッタリくっついていないものがあったらNG
-        let is_touching = _mm256_movemask_epi8(is_touching);
+        let is_touching = _mm256_srli_epi16(is_touching, 15);
+        let touching_count = horizontal_add_u16(is_touching) as usize;
 
-        if is_touching != -1 {
+        if touching_count < Params::get().borrow().touching_threshold {
             return None;
         }
 
@@ -541,7 +542,9 @@ impl ActGen {
                 // invalidなものが1つでもあったらNG
                 let invalid = _mm256_or_si256(invalid_base, invalid_width_limit);
                 let invalid = _mm256_and_si256(pred_y, invalid);
-                let is_invalid = _mm256_movemask_epi8(invalid) != 0;
+                let invalid = _mm256_srli_epi16(invalid, 15);
+                let invalid_cnt = horizontal_add_u16(invalid) as usize;
+                let is_invalid = invalid_cnt > Params::get().borrow().invalid_cnt_threshold;
                 invalid_flag |= (is_invalid as u128) << rect_i;
             }
 
