@@ -10,32 +10,32 @@ import optuna
 def generate_params(trial: optuna.trial.Trial) -> dict[str, str]:
     # for more information, see https://optuna.readthedocs.io/en/stable/reference/generated/optuna.trial.Trial.html
     params = {
-        "AHC_ARRANGE_COUNT": str(trial.suggest_int("arrange_count", 3, 20)),
+        "AHC_ARRANGE_COUNT": str(trial.suggest_int("arrange_count", 5, 20)),
         "AHC_QUERY_ANNEALING_DURATION_SEC": str(
-            trial.suggest_float("query_annealing_duration_sec", 0.05, 0.5)
+            trial.suggest_float("query_annealing_duration_sec", 0.05, 0.3)
         ),
         "AHC_MCMC_INIT_DURATION_SEC": str(
-            trial.suggest_float("mcmc_init_duration_sec", 0.01, 0.2)
+            trial.suggest_float("mcmc_init_duration_sec", 0.05, 0.15)
         ),
         "AHC_BEAM_MCTS_DURATION_RATIO": str(
-            trial.suggest_float("beam_mcts_duration_ratio", 0.2, 0.8)
+            trial.suggest_float("beam_mcts_duration_ratio", 0.3, 0.7)
         ),
         "AHC_MCMC_DURATION_RATIO": str(
-            trial.suggest_float("mcmc_duration_ratio", 0.01, 0.2)
+            trial.suggest_float("mcmc_duration_ratio", 0.03, 0.2)
         ),
-        "AHC_MCTS_TURN": str(trial.suggest_int("mcts_turn", 5, 25)),
+        "AHC_MCTS_TURN": str(trial.suggest_int("mcts_turn", 8, 20)),
         "AHC_MCTS_EXPANSION_THRESHOLD": str(
-            trial.suggest_int("mcts_expansion_threshold", 1, 10)
+            trial.suggest_int("mcts_expansion_threshold", 1, 5)
         ),
         "AHC_MCTS_CANDIDATES_COUNT": str(
-            trial.suggest_int("mcts_candidates_count", 2, 10)
+            trial.suggest_int("mcts_candidates_count", 2, 6)
         ),
         "AHC_PARALLEL_SCORE_MUL": str(
-            trial.suggest_float("parallel_score_mul", 0.5, 1.0)
+            trial.suggest_float("parallel_score_mul", 0.7, 1.0)
         ),
-        "AHC_WIDTH_BUF": str(trial.suggest_float("width_buf", 1.0, 1.2)),
+        "AHC_WIDTH_BUF": str(trial.suggest_float("width_buf", 1.05, 1.15)),
         "AHC_UCB1_TUNED_COEF": str(
-            trial.suggest_float("ucb1_tuned_coef", 0.2, 5.0, log=True)
+            trial.suggest_float("ucb1_tuned_coef", 0.1, 1.0, log=True)
         ),
     }
 
@@ -64,7 +64,7 @@ def get_direction() -> str:
 
 # TODO: Set the timeout (seconds) or the number of trials
 def run_optimization(study: optuna.study.Study) -> None:
-    study.optimize(Objective(), timeout=1200)
+    study.optimize(Objective(), timeout=600)
     # study.optimize(Objective(), n_trials=100)
 
 
@@ -138,32 +138,33 @@ class Objective:
         return sum(scores) / len(scores)
 
 
-study = optuna.create_study(
-    direction=get_direction(),
-    study_name="optuna-study",
-    pruner=optuna.pruners.WilcoxonPruner(),
-    sampler=optuna.samplers.TPESampler(),
-)
+if __name__ == "__main__":
+    study = optuna.create_study(
+        direction=get_direction(),
+        study_name="optuna-study",
+        pruner=optuna.pruners.WilcoxonPruner(),
+        sampler=optuna.samplers.TPESampler(),
+    )
 
-study.enqueue_trial(
-    {
-        "arrange_count": 10,
-        "query_annealing_duration_sec": 0.3,
-        "mcmc_init_duration_sec": 0.1,
-        "beam_mcts_duration_ratio": 0.5,
-        "mcmc_duration_ratio": 0.1,
-        "mcts_turn": 15,
-        "mcts_expansion_threshold": 3,
-        "mcts_candidates_count": 4,
-        "parallel_score_mul": 0.9,
-        "width_buf": 1.1,
-        "ucb1_tuned_coef": 1.0,
-    }
-)
+    study.enqueue_trial(
+        {
+            "arrange_count": 10,
+            "query_annealing_duration_sec": 0.3,
+            "mcmc_init_duration_sec": 0.1,
+            "beam_mcts_duration_ratio": 0.5,
+            "mcmc_duration_ratio": 0.1,
+            "mcts_turn": 15,
+            "mcts_expansion_threshold": 3,
+            "mcts_candidates_count": 4,
+            "parallel_score_mul": 0.9,
+            "width_buf": 1.1,
+            "ucb1_tuned_coef": 1.0,
+        }
+    )
 
-run_optimization(study)
+    run_optimization(study)
 
-print(f"best params = {study.best_params}")
-print(f"best score  = {study.best_value}")
+    print(f"best params = {study.best_params}")
+    print(f"best score  = {study.best_value}")
 
-# optuna.visualization.plot_param_importances(study).show()
+    # optuna.visualization.plot_param_importances(study).show()
