@@ -105,7 +105,7 @@ class Objective:
 
     def generate_params(self, trial: optuna.trial.Trial) -> dict[str, str]:
         # for more information, see https://optuna.readthedocs.io/en/stable/reference/generated/optuna.trial.Trial.html
-        max_arrange_count = min(self.t - 1, min(20))
+        max_arrange_count = min(self.t - 1, 20)
         params = {
             "AHC_ARRANGE_COUNT": str(
                 trial.suggest_int("arrange_count", 3, max_arrange_count)
