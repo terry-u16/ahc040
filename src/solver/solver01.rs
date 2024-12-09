@@ -27,8 +27,8 @@ impl Solver for Solver01 {
         eprintln!("[Init]");
         estimator.dump_estimated(judge.rects());
 
-        let arrange_trial_count = Params::get().arrange_count;
-        let duration = Params::get().query_annealing_duration_sec
+        let arrange_trial_count = Params::get().borrow().arrange_count;
+        let duration = Params::get().borrow().query_annealing_duration_sec
             / (input.query_cnt() - arrange_trial_count) as f64;
         let mut observations = vec![];
 
@@ -64,7 +64,7 @@ impl Solver for Solver01 {
             observations.clone(),
             gauss_rects.clone(),
             rect_std_dev,
-            Params::get().mcmc_init_duration_sec,
+            Params::get().borrow().mcmc_init_duration_sec,
             &mut rng,
             &mut judge,
         );
@@ -74,12 +74,13 @@ impl Solver for Solver01 {
             let duration =
                 (2.95 - input.since().elapsed().as_secs_f64()) / remaining_arrange_count as f64;
 
-            let search_ratio = 1.0 - Params::get().mcmc_duration_ratio;
-            let beam_duration = duration * search_ratio * Params::get().beam_mcts_duration_ratio;
+            let search_ratio = 1.0 - Params::get().borrow().mcmc_duration_ratio;
+            let beam_duration =
+                duration * search_ratio * Params::get().borrow().beam_mcts_duration_ratio;
             let mcts_duration =
-                duration * search_ratio * (1.0 - Params::get().beam_mcts_duration_ratio);
-            let mcmc_duration = duration * Params::get().mcmc_duration_ratio;
-            let first_step_turn = input.rect_cnt() - Params::get().mcts_turn;
+                duration * search_ratio * (1.0 - Params::get().borrow().beam_mcts_duration_ratio);
+            let mcmc_duration = duration * Params::get().borrow().mcmc_duration_ratio;
+            let first_step_turn = input.rect_cnt() - Params::get().borrow().mcts_turn;
 
             let sampled_rects = mcmc_sampler.sample(mcmc_duration, &mut rng);
 

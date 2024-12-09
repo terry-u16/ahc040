@@ -32,7 +32,7 @@ impl MultiBeamArrangerSimd {
         let standard_beam_width = 100_000 / (input.rect_cnt() as usize);
         let beam_width_suggester = BayesianBeamWidthSuggester::new(
             input.rect_cnt(),
-            7,
+            5,
             remaining_time,
             standard_beam_width,
             1,
@@ -97,7 +97,7 @@ impl LargeState {
         // 10%余裕を持たせる
         // TODO: パラメータ調整
         let default_width =
-            AlignedU16(areas.map(|a| (a as f64 * Params::get().width_buf).sqrt() as u16));
+            AlignedU16(areas.map(|a| (a as f64 * Params::get().borrow().width_buf).sqrt() as u16));
 
         let width_limit = default_width;
         let height_limit = AlignedU16([u16::MAX / 2; AVX2_U16_W]);
@@ -201,7 +201,7 @@ impl SmallState {
         // （期待値を最大化するよりは上振れを狙いたいため）
         thread_local!(static SCORE_MUL: [AlignedF32; 2] = {
             // TODO: パラメータ調整
-            let score_mul = Params::get().parallel_score_mul;
+            let score_mul = Params::get().borrow().parallel_score_mul;
             [
                 AlignedF32(std::array::from_fn(|i| score_mul.powi(i as i32))),
                 AlignedF32(std::array::from_fn(|i| {

@@ -1,7 +1,8 @@
 mod atcoder_judge;
-mod self_judge;
 pub mod params;
+mod self_judge;
 
+use params::Params;
 use proconio::input_interactive;
 use std::{fmt::Display, time::Instant};
 
@@ -37,6 +38,12 @@ impl Input {
 
             rectangles.push(Measure::new(height, width));
         }
+
+        let params = Params::new(rect_cnt, query_cnt, std_dev);
+        eprintln!("[Params]");
+        eprintln!("{}", params);
+
+        *Params::get().borrow_mut() = params;
 
         Self {
             rect_cnt,
